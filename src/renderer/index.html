@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NeoPowerPoint</title>
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body class="theme-dark">
+  <div id="app" class="app-layout">
+    <!-- Top Navigation & Toolbar -->
+    <header id="top-toolbar" class="toolbar">
+      <div class="toolbar-left">
+        <button id="btn-toggle-sidebar" class="btn-icon" title="Toggle Slide List (S)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+        </button>
+        <div class="deck-info">
+          <span id="deck-title" class="deck-title">No Presentation Open</span>
+          <span id="live-badge" class="badge-live hidden" title="Changes in local files will auto-reload">
+            <span class="live-dot"></span> LIVE SYNC
+          </span>
+        </div>
+      </div>
+
+      <div class="toolbar-center">
+        <button id="btn-prev-slide" class="btn-icon" title="Previous Slide (Left Arrow)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="slide-counter-wrapper">
+          <span id="slide-counter">0 / 0</span>
+        </div>
+        <button id="btn-next-slide" class="btn-icon" title="Next Slide (Right Arrow / Space)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+
+      <div class="toolbar-right">
+        <button id="btn-overview-grid" class="btn btn-secondary" title="Slide Overview Grid (O)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Overview
+        </button>
+
+        <button id="btn-windowed-mode" class="btn btn-primary" title="Windowed Presentation Mode (W) — Fills window cleanly for Zoom/Teams">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+          Windowed Present
+        </button>
+
+        <button id="btn-fullscreen-mode" class="btn btn-primary" title="Fullscreen Presentation (F11 / F)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+          Fullscreen
+        </button>
+
+        <button id="btn-presenter-mode" class="btn btn-secondary" title="Dual-Screen Presenter View with Notes (P)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><path d="M7 8h10M7 12h5"/></svg>
+          Presenter View
+        </button>
+
+        <div class="dropdown">
+          <button id="btn-menu-more" class="btn-icon" title="Deck & File Menu">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+          </button>
+          <div id="dropdown-menu" class="dropdown-content hidden">
+            <button id="menu-open-folder">📂 Open Folder...</button>
+            <button id="menu-open-package">📦 Open .neopres Package...</button>
+            <button id="menu-export-package">💾 Export as .neopres...</button>
+            <div class="dropdown-divider"></div>
+            <button id="menu-new-deck">✨ New Presentation...</button>
+            <button id="menu-new-slide">➕ Add New Slide...</button>
+            <div class="dropdown-divider"></div>
+            <button id="menu-reload-slide">🔄 Reload Slide (R)</button>
+            <button id="menu-help-shortcuts">⌨️ Keyboard Shortcuts (?)</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="workspace">
+      <!-- Left Sidebar: Slide Thumbnails & Manager -->
+      <aside id="sidebar-slides" class="sidebar">
+        <div class="sidebar-header">
+          <h3>Slides</h3>
+          <button id="btn-sidebar-add-slide" class="btn btn-sm btn-secondary" title="Add Slide">+</button>
+        </div>
+        <div id="slides-list" class="slides-list">
+          <!-- Slide items generated dynamically -->
+        </div>
+        <!-- Notes Preview / Editor Panel at bottom of sidebar -->
+        <div class="sidebar-notes-panel">
+          <div class="notes-panel-header">
+            <h4>Speaker Notes</h4>
+            <button id="btn-save-notes" class="btn-text">Save</button>
+          </div>
+          <textarea id="slide-notes-editor" placeholder="Add presenter speaker notes for this slide..."></textarea>
+        </div>
+      </aside>
+
+      <!-- Central Stage: Presentation Viewport -->
+      <section id="viewport-stage" class="stage">
+        <!-- Empty State Screen -->
+        <div id="empty-state" class="empty-screen">
+          <div class="empty-card">
+            <div class="empty-icon">📽️</div>
+            <h2>Welcome to NeoPowerPoint</h2>
+            <p>Run full HTML5 & JavaScript interactive presentations with canvas, animations, and custom widgets.</p>
+            <div class="empty-actions">
+              <button id="btn-welcome-sample" class="btn btn-primary btn-lg">🚀 Load Interactive Demo</button>
+              <button id="btn-welcome-open-folder" class="btn btn-secondary btn-lg">📂 Open Presentation Folder</button>
+              <button id="btn-welcome-open-package" class="btn btn-secondary btn-lg">📦 Open .neopres Package</button>
+              <button id="btn-welcome-new" class="btn btn-secondary btn-lg">✨ Create New Presentation</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Presentation Slide Container (Aspect Ratio Scaled) -->
+        <div id="slide-wrapper" class="slide-wrapper hidden">
+          <div id="slide-box" class="slide-box">
+            <iframe id="slide-frame" class="slide-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
+          </div>
+        </div>
+
+        <!-- Floating Navigation Controls in presentation mode (auto-fades) -->
+        <div id="floating-controls" class="floating-controls hidden">
+          <button id="float-prev" class="float-btn" title="Previous Slide">‹</button>
+          <span id="float-counter" class="float-counter">1 / 1</span>
+          <button id="float-next" class="float-btn" title="Next Slide">›</button>
+          <button id="float-exit" class="float-btn float-exit" title="Exit Presentation Mode (Esc / W)">✕</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Slide Overview Grid Overlay -->
+    <div id="overview-modal" class="modal-overlay hidden">
+      <div class="overview-container">
+        <div class="overview-header">
+          <h2>Slide Overview</h2>
+          <button id="btn-close-overview" class="btn-icon">✕</button>
+        </div>
+        <div id="overview-grid" class="overview-grid">
+          <!-- Slide cards populated dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Keyboard Shortcuts Modal -->
+    <div id="shortcuts-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Keyboard Shortcuts</h3>
+          <button id="btn-close-shortcuts" class="btn-icon">✕</button>
+        </div>
+        <div class="shortcuts-list">
+          <div class="shortcut-item"><kbd>→</kbd> / <kbd>Space</kbd> / <kbd>PageDown</kbd><span>Next Slide</span></div>
+          <div class="shortcut-item"><kbd>←</kbd> / <kbd>Backspace</kbd> / <kbd>PageUp</kbd><span>Previous Slide</span></div>
+          <div class="shortcut-item"><kbd>Home</kbd> / <kbd>End</kbd><span>First / Last Slide</span></div>
+          <div class="shortcut-item"><kbd>W</kbd><span>Toggle Windowed Presentation Mode (fills window)</span></div>
+          <div class="shortcut-item"><kbd>F11</kbd> / <kbd>F</kbd><span>Toggle Fullscreen Mode</span></div>
+          <div class="shortcut-item"><kbd>P</kbd><span>Open Presenter View (notes + timer)</span></div>
+          <div class="shortcut-item"><kbd>O</kbd> / <kbd>Esc</kbd><span>Slide Overview Grid</span></div>
+          <div class="shortcut-item"><kbd>R</kbd><span>Reload Slide (Live Edit Refresh)</span></div>
+          <div class="shortcut-item"><kbd>S</kbd><span>Toggle Slide Manager Sidebar</span></div>
+          <div class="shortcut-item"><kbd>?</kbd><span>Show Keyboard Shortcuts</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

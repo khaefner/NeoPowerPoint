@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NeoPowerPoint — Presenter View</title>
+  <link rel="stylesheet" href="presenter.css">
+</head>
+<body>
+  <div class="presenter-container">
+    <!-- Top Bar: Clock, Timer, Deck Title -->
+    <header class="presenter-header">
+      <div class="header-left">
+        <h2 id="p-deck-title">Presentation Title</h2>
+      </div>
+
+      <div class="header-center">
+        <!-- Elapsed Timer -->
+        <div class="timer-card">
+          <span class="timer-label">ELAPSED</span>
+          <span id="timer-display" class="timer-digits">00:00:00</span>
+          <div class="timer-buttons">
+            <button id="btn-timer-pause" class="btn-micro" title="Pause/Resume">⏸</button>
+            <button id="btn-timer-reset" class="btn-micro" title="Reset Timer">↺</button>
+          </div>
+        </div>
+
+        <!-- Real Wall Clock -->
+        <div class="clock-card">
+          <span class="clock-label">CLOCK</span>
+          <span id="clock-display" class="clock-digits">12:00:00 PM</span>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <span id="p-slide-counter" class="slide-indicator">Slide 1 of 1</span>
+      </div>
+    </header>
+
+    <!-- Main Stage Grid -->
+    <main class="presenter-grid">
+      <!-- Left: Current Slide Live Preview -->
+      <section class="panel current-slide-panel">
+        <div class="panel-header">
+          <span class="panel-badge">CURRENT SLIDE</span>
+          <span id="current-slide-name" class="panel-subtext">Slide Title</span>
+        </div>
+        <div class="preview-viewport" id="current-viewport">
+          <div class="preview-scaler" id="current-scaler">
+            <iframe id="current-frame" class="preview-iframe" sandbox="allow-scripts allow-same-origin"></iframe>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Next Slide Preview + Speaker Notes -->
+      <section class="panel side-panel">
+        <!-- Next Slide Preview -->
+        <div class="next-slide-section">
+          <div class="panel-header">
+            <span class="panel-badge badge-next">NEXT SLIDE</span>
+            <span id="next-slide-name" class="panel-subtext">Next Title</span>
+          </div>
+          <div class="preview-viewport" id="next-viewport">
+            <div class="preview-scaler" id="next-scaler">
+              <iframe id="next-frame" class="preview-iframe" sandbox="allow-scripts allow-same-origin"></iframe>
+            </div>
+          </div>
+        </div>
+
+        <!-- Speaker Notes -->
+        <div class="notes-section">
+          <div class="panel-header">
+            <span class="panel-badge badge-notes">SPEAKER NOTES</span>
+            <div class="notes-tools">
+              <button id="btn-notes-smaller" class="btn-micro" title="Decrease font size">A-</button>
+              <button id="btn-notes-larger" class="btn-micro" title="Increase font size">A+</button>
+            </div>
+          </div>
+          <div id="p-notes-content" class="notes-body">
+            <p class="notes-placeholder">No speaker notes for this slide.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Navigation Bar -->
+    <footer class="presenter-footer">
+      <button id="btn-p-prev" class="btn-nav" title="Previous Slide (Left Arrow)">‹ Previous</button>
+      <div id="slide-strip" class="slide-strip">
+        <!-- Thumbnails / Pills for each slide -->
+      </div>
+      <button id="btn-p-next" class="btn-nav btn-nav-primary" title="Next Slide (Right Arrow / Space)">Next ›</button>
+    </footer>
+  </div>
+
+  <script type="module" src="presenter.js"></script>
+</body>
+</html>

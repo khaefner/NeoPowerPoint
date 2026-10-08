@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Algorithm Visualizer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 100vw;
+      height: 100vh;
+      background: #090d16;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      padding: 60px 80px;
+      overflow: hidden;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 30px;
+    }
+    h2 { font-size: 3rem; font-weight: 700; color: #f8fafc; }
+    p.sub { font-size: 1.3rem; color: #94a3b8; margin-top: 6px; }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .btn {
+      padding: 10px 20px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .btn:hover { background: #334155; }
+    .btn-primary { background: #0284c7; border-color: #38bdf8; }
+    .btn-primary:hover { background: #0ea5e9; }
+
+    .stage {
+      flex: 1;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 30px;
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      position: relative;
+    }
+
+    .bar {
+      flex: 1;
+      background: #38bdf8;
+      border-radius: 6px 6px 0 0;
+      transition: height 0.08s ease, background-color 0.08s ease;
+      min-width: 8px;
+    }
+    .bar.comparing { background: #fbbf24; }
+    .bar.swapping { background: #f472b6; }
+    .bar.sorted { background: #34d399; }
+
+    .status-bar {
+      position: absolute;
+      top: 20px;
+      left: 30px;
+      font-size: 1.1rem;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h2>Quicksort & Bubble Sort Simulator</h2>
+      <p class="sub">Educational live algorithmic execution directly inside presentation slides.</p>
+    </div>
+    <div class="controls">
+      <button class="btn" id="btn-reset">↺ Shuffle</button>
+      <button class="btn btn-primary" id="btn-sort">▶ Start Bubble Sort</button>
+      <button class="btn" id="btn-quick">⚡ Quicksort</button>
+    </div>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="status-bar" id="status">Status: Ready</div>
+  </div>
+
+  <script>
+    const stage = document.getElementById('stage');
+    const statusEl = document.getElementById('status');
+    const count = 35;
+    let array = [];
+    let isSorting = false;
+
+    function reset() {
+      if (isSorting) return;
+      array = [];
+      for (let i = 0; i < count; i++) {
+        array.push(Math.floor(Math.random() * 85) + 10);
+      }
+      render();
+      statusEl.textContent = 'Status: Shuffled & Ready';
+    }
+
+    function render(comparing = [], swapping = [], sorted = []) {
+      stage.querySelectorAll('.bar').forEach(b => b.remove());
+      array.forEach((val, idx) => {
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        bar.style.height = `${val}%`;
+
+        if (comparing.includes(idx)) bar.classList.add('comparing');
+        if (swapping.includes(idx)) bar.classList.add('swapping');
+        if (sorted.includes(idx)) bar.classList.add('sorted');
+
+        stage.appendChild(bar);
+      });
+    }
+
+    const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+    async function bubbleSort() {
+      if (isSorting) return;
+      isSorting = true;
+      statusEl.textContent = 'Status: Bubble Sort in progress...';
+
+      const n = array.length;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n - i - 1; j++) {
+          render([j, j + 1], []);
+          await sleep(35);
+          if (array[j] > array[j + 1]) {
+            render([], [j, j + 1]);
+            const temp = array[j];
+            array[j] = array[j + 1];
+            array[j + 1] = temp;
+            await sleep(35);
+          }
+        }
+      }
+
+      render([], [], array.map((_, i) => i));
+      statusEl.textContent = 'Status: Sorted!';
+      isSorting = false;
+    }
+
+    async function quickSort() {
+      if (isSorting) return;
+      isSorting = true;
+      statusEl.textContent = 'Status: Quicksort in progress...';
+
+      async function partition(low, high) {
+        const pivot = array[high];
+        let i = low - 1;
+        for (let j = low; j < high; j++) {
+          render([j, high], []);
+          await sleep(40);
+          if (array[j] < pivot) {
+            i++;
+            const t = array[i];
+            array[i] = array[j];
+            array[j] = t;
+            render([], [i, j]);
+            await sleep(40);
+          }
+        }
+        const t = array[i + 1];
+        array[i + 1] = array[high];
+        array[high] = t;
+        return i + 1;
+      }
+
+      async function qs(low, high) {
+        if (low < high) {
+          const pi = await partition(low, high);
+          await qs(low, pi - 1);
+          await qs(pi + 1, high);
+        }
+      }
+
+      await qs(0, array.length - 1);
+      render([], [], array.map((_, i) => i));
+      statusEl.textContent = 'Status: Quicksort complete!';
+      isSorting = false;
+    }
+
+    document.getElementById('btn-reset').addEventListener('click', reset);
+    document.getElementById('btn-sort').addEventListener('click', bubbleSort);
+    document.getElementById('btn-quick').addEventListener('click', quickSort);
+
+    reset();
+  </script>
+</body>
+</html>

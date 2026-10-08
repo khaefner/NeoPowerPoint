@@ -1,0 +1,44 @@
+{
+  "version": "1.0.0",
+  "title": "Interactive HTML & JavaScript Presentation",
+  "author": "NeoPowerPoint",
+  "aspectRatio": "16:9",
+  "customWidth": 1920,
+  "customHeight": 1080,
+  "theme": "dark",
+  "defaultTransition": "fade",
+  "slides": [
+    {
+      "id": "slide-1",
+      "title": "Welcome to NeoPowerPoint",
+      "path": "slides/01-welcome/index.html",
+      "notes": "Introduce the presentation. Mention that every slide is an isolated, 100% standard web page running real JavaScript, CSS animations, and Canvas/WebGL.",
+      "durationSec": 60,
+      "transition": "fade"
+    },
+    {
+      "id": "slide-2",
+      "title": "Interactive Data Visualizer",
+      "path": "slides/02-data-visualizer/index.html",
+      "notes": "Demonstrate the interactive chart. Click the buttons to switch metrics and observe real-time dynamic re-rendering with smooth animation.",
+      "durationSec": 90,
+      "transition": "fade"
+    },
+    {
+      "id": "slide-3",
+      "title": "3D Canvas Particle Physics",
+      "path": "slides/03-particle-physics/index.html",
+      "notes": "Show off the high performance canvas simulation. Hover and drag your mouse to interact with the gravitational particle field.",
+      "durationSec": 90,
+      "transition": "fade"
+    },
+    {
+      "id": "slide-4",
+      "title": "Sorting Algorithm Visualizer",
+      "path": "slides/04-algorithm-visualizer/index.html",
+      "notes": "Run the algorithm visualizer by clicking Start or Step. Slides can contain fully functional educational tools, demos, and simulations.",
+      "durationSec": 120,
+      "transition": "fade"
+    }
+  ]
+}

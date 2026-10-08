@@ -1,0 +1,430 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import AdmZip from 'adm-zip';
+import { app } from 'electron';
+import { DeckManifest, SlideMetadata } from '../types/deck';
+
+export class DeckService {
+  private activeDeckPath: string | null = null;
+  private activeManifest: DeckManifest | null = null;
+  private sourcePackagePath: string | null = null;
+
+  getActiveDeckPath(): string | null {
+    return this.activeDeckPath;
+  }
+
+  getActiveManifest(): DeckManifest | null {
+    return this.activeManifest;
+  }
+
+  getSourcePackagePath(): string | null {
+    return this.sourcePackagePath;
+  }
+
+  /**
+   * Opens a presentation folder. If no deck.json exists, scans for HTML files and creates one.
+   */
+  async openFolder(folderPath: string): Promise<{ deckPath: string; manifest: DeckManifest }> {
+    const manifestPath = path.join(folderPath, 'deck.json');
+    let manifest: DeckManifest;
+
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const raw = await fs.promises.readFile(manifestPath, 'utf-8');
+        manifest = JSON.parse(raw) as DeckManifest;
+      } catch (err: any) {
+        throw new Error(`Failed to parse deck.json: ${err.message}`);
+      }
+    } else {
+      // Auto-discover HTML slides
+      manifest = await this.autoDiscoverDeck(folderPath);
+      await this.saveManifest(folderPath, manifest);
+    }
+
+    this.validateAndNormalizeManifest(folderPath, manifest);
+    this.activeDeckPath = folderPath;
+    this.activeManifest = manifest;
+    this.sourcePackagePath = null;
+
+    return { deckPath: folderPath, manifest };
+  }
+
+  /**
+   * Opens a .neopres or .zip file by extracting it into a temporary session cache.
+   */
+  async openPackage(packageFilePath: string): Promise<{ deckPath: string; manifest: DeckManifest }> {
+    if (!fs.existsSync(packageFilePath)) {
+      throw new Error(`Package file does not exist: ${packageFilePath}`);
+    }
+
+    const zip = new AdmZip(packageFilePath);
+    const sanitizedName = path.basename(packageFilePath, path.extname(packageFilePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const extractDir = path.join(app.getPath('temp'), 'neopowerpoint', `${sanitizedName}_${Date.now()}`);
+
+    await fs.promises.mkdir(extractDir, { recursive: true });
+    zip.extractAllTo(extractDir, true);
+
+    const result = await this.openFolder(extractDir);
+    this.sourcePackagePath = packageFilePath;
+    return result;
+  }
+
+  /**
+   * Exports the active or specified deck folder to a .neopres file.
+   */
+  async exportPackage(folderPath: string, outputFilePath: string): Promise<string> {
+    const zip = new AdmZip();
+    zip.addLocalFolder(folderPath);
+    await zip.writeZipPromise(outputFilePath);
+    return outputFilePath;
+  }
+
+  /**
+   * Saves updated manifest (e.g. reordered slides, modified notes, settings).
+   */
+  async saveManifest(folderPath: string, manifest: DeckManifest): Promise<void> {
+    const manifestPath = path.join(folderPath, 'deck.json');
+    await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+    if (this.activeDeckPath === folderPath) {
+      this.activeManifest = manifest;
+    }
+  }
+
+  /**
+   * Creates a new presentation folder scaffolded with interactive sample slides.
+   */
+  async createNewDeck(targetFolder: string, title: string = 'New Presentation'): Promise<{ deckPath: string; manifest: DeckManifest }> {
+    await fs.promises.mkdir(targetFolder, { recursive: true });
+    const slidesDir = path.join(targetFolder, 'slides');
+    const assetsDir = path.join(targetFolder, 'assets');
+    await fs.promises.mkdir(slidesDir, { recursive: true });
+    await fs.promises.mkdir(assetsDir, { recursive: true });
+
+    // Slide 1: Welcome
+    const slide1Dir = path.join(slidesDir, '01-welcome');
+    await fs.promises.mkdir(slide1Dir, { recursive: true });
+    const slide1Html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Welcome to NeoPowerPoint</title>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+    }
+    h1 {
+      font-size: 4rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p {
+      font-size: 1.5rem;
+      color: #94a3b8;
+      max-width: 800px;
+      text-align: center;
+      line-height: 1.6;
+    }
+    .badge {
+      margin-top: 2rem;
+      padding: 0.6rem 1.4rem;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 9999px;
+      color: #38bdf8;
+      font-weight: 500;
+      font-size: 1.1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>${title}</h1>
+  <p>An interactive, cross-platform presentation powered by HTML, CSS, and full JavaScript execution.</p>
+  <div class="badge" id="counter">Click anywhere or use arrow keys</div>
+
+  <script>
+    let clicks = 0;
+    const badge = document.getElementById('counter');
+    window.addEventListener('pointerdown', () => {
+      clicks++;
+      badge.textContent = 'Interactive clicks: ' + clicks;
+    });
+  </script>
+</body>
+</html>`;
+    await fs.promises.writeFile(path.join(slide1Dir, 'index.html'), slide1Html, 'utf-8');
+
+    // Slide 2: Interactive Particles / Canvas
+    const slide2Dir = path.join(slidesDir, '02-interactive-canvas');
+    await fs.promises.mkdir(slide2Dir, { recursive: true });
+    const slide2Html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Live JavaScript Canvas</title>
+  <style>
+    body {
+      margin: 0;
+      background: #020617;
+      color: #fff;
+      font-family: system-ui, sans-serif;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+    }
+    .overlay {
+      position: absolute;
+      top: 40px;
+      left: 60px;
+      pointer-events: none;
+      z-index: 10;
+    }
+    h2 { font-size: 3rem; margin: 0 0 10px 0; color: #38bdf8; }
+    p { font-size: 1.3rem; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="overlay">
+    <h2>Interactive Particle Physics</h2>
+    <p>Move your cursor around to interact with live particles.</p>
+  </div>
+  <canvas id="c"></canvas>
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    let w = canvas.width = window.innerWidth;
+    let h = canvas.height = window.innerHeight;
+
+    window.addEventListener('resize', () => {
+      w = canvas.width = window.innerWidth;
+      h = canvas.height = window.innerHeight;
+    });
+
+    const particles = [];
+    const count = 100;
+    let mouse = { x: w / 2, y: h / 2, active: false };
+
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 2,
+        vy: (Math.random() - 0.5) * 2,
+        radius: Math.random() * 3 + 2,
+        color: ['#38bdf8', '#818cf8', '#c084fc', '#f472b6'][Math.floor(Math.random() * 4)]
+      });
+    }
+
+    window.addEventListener('mousemove', (e) => {
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+      mouse.active = true;
+    });
+
+    function loop() {
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.2)';
+      ctx.fillRect(0, 0, w, h);
+
+      for (const p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0 || p.x > w) p.vx *= -1;
+        if (p.y < 0 || p.y > h) p.vy *= -1;
+
+        if (mouse.active) {
+          const dx = mouse.x - p.x;
+          const dy = mouse.y - p.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 150) {
+            p.x += dx * 0.02;
+            p.y += dy * 0.02;
+          }
+        }
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+      }
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>`;
+    await fs.promises.writeFile(path.join(slide2Dir, 'index.html'), slide2Html, 'utf-8');
+
+    const manifest: DeckManifest = {
+      version: '1.0.0',
+      title,
+      aspectRatio: '16:9',
+      customWidth: 1920,
+      customHeight: 1080,
+      theme: 'dark',
+      defaultTransition: 'fade',
+      slides: [
+        {
+          id: 'slide-1',
+          title: 'Welcome',
+          path: 'slides/01-welcome/index.html',
+          notes: 'Welcome the audience and explain that slides execute real HTML & JavaScript.',
+          durationSec: 60,
+          transition: 'fade'
+        },
+        {
+          id: 'slide-2',
+          title: 'Interactive Canvas',
+          path: 'slides/02-interactive-canvas/index.html',
+          notes: 'Move your mouse to demonstrate live canvas animation and physics.',
+          durationSec: 90,
+          transition: 'fade'
+        }
+      ]
+    };
+
+    await this.saveManifest(targetFolder, manifest);
+    return this.openFolder(targetFolder);
+  }
+
+  /**
+   * Adds a new slide to an existing presentation.
+   */
+  async addNewSlide(folderPath: string, title: string): Promise<DeckManifest> {
+    const manifestPath = path.join(folderPath, 'deck.json');
+    const raw = await fs.promises.readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(raw) as DeckManifest;
+
+    const slideIndex = manifest.slides.length + 1;
+    const folderSlug = `${String(slideIndex).padStart(2, '0')}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'slide'}`;
+    const slideDir = path.join(folderPath, 'slides', folderSlug);
+    await fs.promises.mkdir(slideDir, { recursive: true });
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: system-ui, sans-serif;
+    }
+    h1 { font-size: 3.5rem; margin-bottom: 1rem; color: #38bdf8; }
+    p { font-size: 1.5rem; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <h1>${title}</h1>
+  <p>Edit this slide at <code>slides/${folderSlug}/index.html</code></p>
+</body>
+</html>`;
+
+    await fs.promises.writeFile(path.join(slideDir, 'index.html'), htmlContent, 'utf-8');
+
+    const newSlide: SlideMetadata = {
+      id: `slide-${Date.now()}`,
+      title,
+      path: path.posix.join('slides', folderSlug, 'index.html'),
+      notes: '',
+      transition: 'fade'
+    };
+
+    manifest.slides.push(newSlide);
+    await this.saveManifest(folderPath, manifest);
+    return manifest;
+  }
+
+  private async autoDiscoverDeck(folderPath: string): Promise<DeckManifest> {
+    const slides: SlideMetadata[] = [];
+    const findHtmlFiles = async (dir: string, prefix = '') => {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const rel = path.join(prefix, entry.name);
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          // Check for index.html inside
+          const indexHtml = path.join(full, 'index.html');
+          if (fs.existsSync(indexHtml)) {
+            const title = entry.name.replace(/^\d+[-_]?/, '').replace(/[-_]/g, ' ') || entry.name;
+            slides.push({
+              id: `slide-${slides.length + 1}`,
+              title: title.charAt(0).toUpperCase() + title.slice(1),
+              path: path.posix.join(rel, 'index.html'),
+              notes: ''
+            });
+          } else {
+            await findHtmlFiles(full, rel);
+          }
+        } else if (entry.isFile() && entry.name.endsWith('.html') && entry.name !== 'index.html') {
+          const title = entry.name.replace(/\.html$/, '').replace(/^\d+[-_]?/, '').replace(/[-_]/g, ' ');
+          slides.push({
+            id: `slide-${slides.length + 1}`,
+            title: title.charAt(0).toUpperCase() + title.slice(1),
+            path: rel.split(path.sep).join('/'),
+            notes: ''
+          });
+        }
+      }
+    };
+
+    await findHtmlFiles(folderPath);
+
+    return {
+      version: '1.0.0',
+      title: path.basename(folderPath),
+      aspectRatio: '16:9',
+      customWidth: 1920,
+      customHeight: 1080,
+      theme: 'dark',
+      slides
+    };
+  }
+
+  private validateAndNormalizeManifest(folderPath: string, manifest: DeckManifest): void {
+    if (!manifest.title) {
+      manifest.title = path.basename(folderPath);
+    }
+    if (!manifest.aspectRatio) {
+      manifest.aspectRatio = '16:9';
+    }
+    if (!manifest.slides || !Array.isArray(manifest.slides)) {
+      manifest.slides = [];
+    }
+
+    manifest.slides.forEach((slide, index) => {
+      if (!slide.id) {
+        slide.id = `slide-${index + 1}`;
+      }
+      if (!slide.title) {
+        slide.title = `Slide ${index + 1}`;
+      }
+      // Normalize slashes to posix
+      if (slide.path) {
+        slide.path = slide.path.replace(/\\/g, '/');
+      }
+    });
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "name": "neopowerpoint",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "npm run build && electron . --no-sandbox",
+    "dev": "npm run build && electron . --no-sandbox",
+    "test": "npm run build && node test/deck-service.test.mjs",
+    "dist": "npm run build && electron-builder",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.neopowerpoint.app",
+    "productName": "NeoPowerPoint",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "sample-deck/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": ["AppImage", "tar.gz"]
+    },
+    "mac": {
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/khaefner/NeoPowerPoint.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/khaefner/NeoPowerPoint/issues"
+  },
+  "homepage": "https://github.com/khaefner/NeoPowerPoint#readme",
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^26.6.4",
+    "adm-zip": "^0.6.1",
+    "chokidar": "^5.0.0",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

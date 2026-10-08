@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Interactive Data Visualizer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 100vw;
+      height: 100vh;
+      background: #090d16;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      padding: 60px 80px;
+      overflow: hidden;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 40px;
+    }
+    h2 { font-size: 3rem; font-weight: 700; color: #f8fafc; }
+    p.sub { font-size: 1.3rem; color: #94a3b8; margin-top: 6px; }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+    }
+    .btn {
+      padding: 10px 20px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .btn:hover { background: #334155; color: #fff; }
+    .btn.active {
+      background: #0284c7;
+      border-color: #38bdf8;
+      color: #fff;
+    }
+
+    .chart-container {
+      flex: 1;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 30px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    canvas {
+      width: 100%;
+      flex: 1;
+      display: block;
+    }
+
+    .legend {
+      display: flex;
+      gap: 30px;
+      justify-content: center;
+      margin-top: 15px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 1.1rem;
+      color: #cbd5e1;
+    }
+    .legend-color { width: 14px; height: 14px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h2>Quarterly Revenue & Growth Engine</h2>
+      <p class="sub">Dynamic HTML5 Canvas data charts rendered with custom easing and interaction.</p>
+    </div>
+    <div class="controls">
+      <button class="btn active" id="btn-2025">2025 Actuals</button>
+      <button class="btn" id="btn-2026">2026 Forecast</button>
+      <button class="btn" id="btn-random">🎲 Randomize Data</button>
+    </div>
+  </div>
+
+  <div class="chart-container">
+    <canvas id="chart"></canvas>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-color" style="background:#38bdf8;"></div> Cloud Subscriptions</div>
+      <div class="legend-item"><div class="legend-color" style="background:#818cf8;"></div> Enterprise Software</div>
+      <div class="legend-item"><div class="legend-color" style="background:#f472b6;"></div> Professional Services</div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('chart');
+    const ctx = canvas.getContext('2d');
+
+    const datasets = {
+      2025: [
+        { label: 'Q1', vals: [42, 28, 15] },
+        { label: 'Q2', vals: [55, 34, 18] },
+        { label: 'Q3', vals: [68, 41, 24] },
+        { label: 'Q4', vals: [85, 49, 31] }
+      ],
+      2026: [
+        { label: 'Q1', vals: [92, 58, 36] },
+        { label: 'Q2', vals: [110, 70, 42] },
+        { label: 'Q3', vals: [135, 84, 49] },
+        { label: 'Q4', vals: [168, 102, 58] }
+      ]
+    };
+
+    let activeData = JSON.parse(JSON.stringify(datasets[2025]));
+    let currentVals = activeData.map(d => [0, 0, 0]);
+    let targetVals = activeData.map(d => [...d.vals]);
+
+    function resize() {
+      canvas.width = canvas.clientWidth * window.devicePixelRatio;
+      canvas.height = canvas.clientHeight * window.devicePixelRatio;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    const colors = ['#38bdf8', '#818cf8', '#f472b6'];
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const w = canvas.width;
+      const h = canvas.height;
+      const padLeft = 80;
+      const padBottom = 60;
+      const chartW = w - padLeft - 40;
+      const chartH = h - padBottom - 40;
+
+      // Draw Grid lines
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 5; i++) {
+        const y = chartH + 20 - (chartH / 5) * i;
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(w - 40, y);
+        ctx.stroke();
+
+        ctx.fillStyle = '#64748b';
+        ctx.font = `${14 * window.devicePixelRatio}px sans-serif`;
+        ctx.textAlign = 'right';
+        ctx.fillText(`$${i * 40}M`, padLeft - 15, y + 5);
+      }
+
+      // Smooth lerp
+      for (let i = 0; i < currentVals.length; i++) {
+        for (let j = 0; j < 3; j++) {
+          currentVals[i][j] += (targetVals[i][j] - currentVals[i][j]) * 0.12;
+        }
+      }
+
+      const numGroups = activeData.length;
+      const groupWidth = chartW / numGroups;
+      const barWidth = groupWidth * 0.22;
+
+      for (let i = 0; i < numGroups; i++) {
+        const groupX = padLeft + i * groupWidth + groupWidth * 0.15;
+
+        // Group Label
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = `bold ${16 * window.devicePixelRatio}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(activeData[i].label, padLeft + i * groupWidth + groupWidth / 2, h - 20);
+
+        for (let j = 0; j < 3; j++) {
+          const val = currentVals[i][j];
+          const barH = (val / 200) * chartH;
+          const x = groupX + j * (barWidth + 12);
+          const y = chartH + 20 - barH;
+
+          ctx.fillStyle = colors[j];
+          ctx.beginPath();
+          ctx.roundRect(x, y, barWidth, barH, [6 * window.devicePixelRatio, 6 * window.devicePixelRatio, 0, 0]);
+          ctx.fill();
+
+          // Val text on bar
+          if (barH > 35) {
+            ctx.fillStyle = '#fff';
+            ctx.font = `bold ${12 * window.devicePixelRatio}px sans-serif`;
+            ctx.fillText(`$${Math.round(val)}M`, x + barWidth / 2, y + 20 * window.devicePixelRatio);
+          }
+        }
+      }
+
+      requestAnimationFrame(draw);
+    }
+    draw();
+
+    document.getElementById('btn-2025').addEventListener('click', (e) => {
+      document.querySelectorAll('.controls .btn').forEach(b => b.classList.remove('active'));
+      e.target.classList.add('active');
+      activeData = JSON.parse(JSON.stringify(datasets[2025]));
+      targetVals = activeData.map(d => [...d.vals]);
+    });
+
+    document.getElementById('btn-2026').addEventListener('click', (e) => {
+      document.querySelectorAll('.controls .btn').forEach(b => b.classList.remove('active'));
+      e.target.classList.add('active');
+      activeData = JSON.parse(JSON.stringify(datasets[2026]));
+      targetVals = activeData.map(d => [...d.vals]);
+    });
+
+    document.getElementById('btn-random').addEventListener('click', () => {
+      targetVals = activeData.map(() => [
+        Math.floor(Math.random() * 120 + 20),
+        Math.floor(Math.random() * 80 + 20),
+        Math.floor(Math.random() * 50 + 10)
+      ]);
+    });
+  </script>
+</body>
+</html>
