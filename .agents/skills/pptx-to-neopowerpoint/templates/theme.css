@@ -1,0 +1,51 @@
+/* Shared theme for the whole deck. Generated from extract.json -> theme.
+   Every slide links this file, so theme changes happen in ONE place.
+   Replace the placeholder values below with the real ones from the PPTX. */
+:root {
+  /* theme.colors (use resolved hex values, keep PPTX names for traceability) */
+  --dk1: #000000;
+  --lt1: #ffffff;
+  --dk2: #3a3a3a;
+  --lt2: #f1f1f1;
+  --accent1: #e00016;
+  --accent2: #af04f7;
+  --accent3: #484bf1;
+  --accent4: #5e658a;
+  --accent5: #9d83f7;
+  --accent6: #007dc3;
+
+  /* theme.fonts - put the font actually used in the deck first, then safe fallbacks */
+  --font-heading: "Castoro", Georgia, "Times New Roman", serif;
+  --font-body: "Nunito Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* canvas (must equal deck.json customWidth/customHeight) */
+  --slide-w: 1920px;
+  --slide-h: 1080px;
+}
+
+/* @font-face declarations go here if font files were copied to assets/fonts/
+@font-face { font-family: "Castoro"; src: url("fonts/Castoro-Regular.woff2") format("woff2"); }
+*/
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: var(--slide-w); height: var(--slide-h); overflow: hidden; }
+body { font-family: var(--font-body); color: var(--lt1); -webkit-font-smoothing: antialiased; }
+
+/* The slide canvas: all children are absolutely positioned with px values taken
+   straight from extract.json (x, y, w, h are already in this 1920-wide space). */
+.slide { position: relative; width: var(--slide-w); height: var(--slide-h); overflow: hidden; }
+.abs   { position: absolute; }
+
+/* Text boxes: the box keeps the PPTX geometry, text flows inside it. */
+.tb { position: absolute; display: flex; flex-direction: column; overflow: visible; white-space: normal; }
+.tb p { margin: 0; }
+.tb.anchor-t { justify-content: flex-start; }
+.tb.anchor-ctr { justify-content: center; }
+.tb.anchor-b { justify-content: flex-end; }
+
+.heading { font-family: var(--font-heading); }
+.bullet-list { list-style: none; }
+.bullet-list li { position: relative; }
+.bullet-list li::before { content: attr(data-bullet); position: absolute; left: calc(-1 * var(--indent, 36px)); }
+
+img.pic { position: absolute; object-fit: fill; display: block; }

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{SLIDE_TITLE}}</title>
+  <!-- slides live at slides/NN-slug/index.html, so shared assets are ../../assets/ -->
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    /* Slide-specific styling only. Colors/fonts must come from theme.css variables. */
+    .slide { background: var(--lt1); /* or effective_background from extract.json */ }
+  </style>
+</head>
+<body>
+  <main class="slide">
+    <!-- 1. Decor shared by the layout (logos, color panels): emit from layouts[...].decor_shapes
+            (and master.decor_shapes when show_master_shapes is true), in z-order, BEFORE slide content. -->
+    <div class="abs" style="left:960px;top:0;width:960px;height:1080px;background:var(--dk2)"></div>
+
+    <!-- 2. Slide content in original z-order. Geometry is copied 1:1 from extract.json. -->
+    <div class="tb heading anchor-ctr" style="left:94.9px;top:169.1px;width:1732.9px;height:109.2px">
+      <p style="font-size:88px;line-height:.9;color:var(--lt1);text-align:left">{{TITLE_TEXT}}</p>
+    </div>
+
+    <!-- Bullets: render real list markup, keep marL/indent from extract.json -->
+    <div class="tb anchor-t" style="left:93.6px;top:321px;width:1732.9px;height:650px">
+      <ul class="bullet-list" style="--indent:36px;padding-left:36px">
+        <li data-bullet="•" style="font-size:44px;line-height:1.14;margin-bottom:20px">{{BULLET_TEXT}}</li>
+      </ul>
+    </div>
+
+    <!-- Images: copied from <extract>/media to assets/media -->
+    <!-- <img class="pic" src="../../assets/media/image1.png" style="left:0;top:0;width:640px;height:360px" alt=""> -->
+  </main>
+</body>
+</html>
