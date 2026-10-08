@@ -339,6 +339,21 @@ ipcMain.handle('deck:save-manifest', async (_, manifest: DeckManifest) => {
   return true;
 });
 
+ipcMain.handle('deck:get-manifest', async () => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  const manifestPath = path.join(activePath, 'deck.json');
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const raw = await fs.promises.readFile(manifestPath, 'utf-8');
+      return JSON.parse(raw);
+    } catch {
+      return deckService.getActiveManifest();
+    }
+  }
+  return deckService.getActiveManifest();
+});
+
 ipcMain.handle('deck:add-slide', async (_, title: string) => {
   const activePath = deckService.getActiveDeckPath();
   if (!activePath) return null;

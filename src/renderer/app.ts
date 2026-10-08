@@ -35,10 +35,18 @@ class PresentationApp {
   private overviewModalEl = document.getElementById('overview-modal')!;
   private overviewGridEl = document.getElementById('overview-grid')!;
   private shortcutsModalEl = document.getElementById('shortcuts-modal')!;
+  private overviewCountBadgeEl = document.getElementById('overview-count-badge');
+
+  // Slide Sorter State
+  private draggedIndex: number | null = null;
+  private sidebarDraggedIndex: number | null = null;
+  private selectedOverviewIndex: number = 0;
 
   constructor() {
     this.setupEventListeners();
     this.setupScaler();
+    this.setupOverviewScaler();
+    this.setupSidebarScaler();
     this.setupIPCListeners();
     this.setupIframeMessageBridge();
   }
@@ -86,6 +94,25 @@ class PresentationApp {
     document.getElementById('btn-close-overview')!.addEventListener('click', () => this.toggleOverview(false));
     document.getElementById('btn-close-shortcuts')!.addEventListener('click', () => this.toggleShortcuts(false));
 
+    // Slide Sorter thumbnail size controls
+    const btnSm = document.getElementById('btn-sorter-size-sm');
+    const btnMd = document.getElementById('btn-sorter-size-md');
+    const btnLg = document.getElementById('btn-sorter-size-lg');
+
+    const setSorterSize = (size: 'sm' | 'md' | 'lg', minW: string) => {
+      [btnSm, btnMd, btnLg].forEach((b) => b?.classList.remove('active'));
+      if (size === 'sm') btnSm?.classList.add('active');
+      else if (size === 'md') btnMd?.classList.add('active');
+      else if (size === 'lg') btnLg?.classList.add('active');
+
+      this.overviewGridEl.style.setProperty('--card-min-width', minW);
+      this.updateOverviewScales();
+    };
+
+    btnSm?.addEventListener('click', () => setSorterSize('sm', '220px'));
+    btnMd?.addEventListener('click', () => setSorterSize('md', '300px'));
+    btnLg?.addEventListener('click', () => setSorterSize('lg', '420px'));
+
     // Floating Controls
     this.floatPrevBtn.addEventListener('click', () => this.prevSlide());
     this.floatNextBtn.addEventListener('click', () => this.nextSlide());
@@ -104,6 +131,60 @@ class PresentationApp {
 
     // Keyboard Shortcuts
     window.addEventListener('keydown', (e) => this.handleKeyDown(e));
+  }
+
+  private setupOverviewScaler(): void {
+    const ro = new ResizeObserver(() => {
+      if (!this.overviewModalEl.classList.contains('hidden')) {
+        this.updateOverviewScales();
+      }
+    });
+    ro.observe(this.overviewGridEl);
+  }
+
+  private updateOverviewScales(): void {
+    if (!this.manifest) return;
+    const baseW = this.manifest.customWidth || 1920;
+    const baseH = this.manifest.customHeight || 1080;
+
+    const containers = this.overviewGridEl.querySelectorAll('.card-preview-container');
+    if (containers.length === 0) return;
+
+    const firstContainer = containers[0] as HTMLElement;
+    const w = firstContainer.clientWidth;
+    if (w <= 0) return;
+
+    const scale = w / baseW;
+    this.overviewGridEl.style.setProperty('--preview-scale', String(scale));
+    this.overviewGridEl.style.setProperty('--slide-base-w', `${baseW}px`);
+    this.overviewGridEl.style.setProperty('--slide-base-h', `${baseH}px`);
+    this.overviewGridEl.style.setProperty('--slide-aspect-ratio', `${baseW} / ${baseH}`);
+  }
+
+  private setupSidebarScaler(): void {
+    const ro = new ResizeObserver(() => {
+      this.updateSidebarScales();
+    });
+    ro.observe(this.slidesListEl);
+  }
+
+  private updateSidebarScales(): void {
+    if (!this.manifest) return;
+    const baseW = this.manifest.customWidth || 1920;
+    const baseH = this.manifest.customHeight || 1080;
+
+    const containers = this.slidesListEl.querySelectorAll('.slide-item-preview-container');
+    if (containers.length === 0) return;
+
+    const firstContainer = containers[0] as HTMLElement;
+    const w = firstContainer.clientWidth;
+    if (w <= 0) return;
+
+    const scale = w / baseW;
+    this.slidesListEl.style.setProperty('--sidebar-preview-scale', String(scale));
+    this.slidesListEl.style.setProperty('--slide-base-w', `${baseW}px`);
+    this.slidesListEl.style.setProperty('--slide-base-h', `${baseH}px`);
+    this.slidesListEl.style.setProperty('--slide-aspect-ratio', `${baseW} / ${baseH}`);
   }
 
   private setupScaler(): void {
@@ -143,6 +224,9 @@ class PresentationApp {
       } else {
         // Slide or asset changed, reload current slide iframe
         this.reloadCurrentSlide();
+        if (!this.overviewModalEl.classList.contains('hidden')) {
+          this.renderOverviewGrid();
+        }
       }
     });
 
@@ -170,6 +254,10 @@ class PresentationApp {
   private setupIframeMessageBridge(): void {
     window.addEventListener('message', (event) => {
       if (!event.data) return;
+      // Only process messages from the active presentation stage slide iframe
+      if (this.slideFrameEl && event.source !== this.slideFrameEl.contentWindow) {
+        return;
+      }
       if (event.data.type === 'NEODECK_NEXT') {
         this.nextSlide();
       } else if (event.data.type === 'NEODECK_PREV') {
@@ -190,6 +278,31 @@ class PresentationApp {
         (activeEl as HTMLElement).blur();
       }
       return;
+    }
+
+    // When Slide Sorter modal is open
+    if (!this.overviewModalEl.classList.contains('hidden') && this.manifest) {
+      const total = this.manifest.slides.length;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        this.selectedOverviewIndex = (this.selectedOverviewIndex + 1) % total;
+        this.highlightOverviewCard(this.selectedOverviewIndex);
+        return;
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.selectedOverviewIndex = (this.selectedOverviewIndex - 1 + total) % total;
+        this.highlightOverviewCard(this.selectedOverviewIndex);
+        return;
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        this.goToSlide(this.selectedOverviewIndex);
+        this.toggleOverview(false);
+        return;
+      } else if (e.key === 'Escape' || e.key === 'o' || e.key === 'O') {
+        e.preventDefault();
+        this.toggleOverview(false);
+        return;
+      }
     }
 
     if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
@@ -283,15 +396,102 @@ class PresentationApp {
     if (!this.manifest) return;
     this.slidesListEl.innerHTML = '';
 
+    const baseW = this.manifest.customWidth || 1920;
+    const baseH = this.manifest.customHeight || 1080;
+    this.slidesListEl.style.setProperty('--slide-base-w', `${baseW}px`);
+    this.slidesListEl.style.setProperty('--slide-base-h', `${baseH}px`);
+    this.slidesListEl.style.setProperty('--slide-aspect-ratio', `${baseW} / ${baseH}`);
+
     this.manifest.slides.forEach((slide, idx) => {
       const item = document.createElement('div');
       item.className = `slide-item ${idx === this.currentIndex ? 'active' : ''}`;
+      item.dataset.index = String(idx);
+      item.setAttribute('draggable', 'true');
+
+      const slideUrl = `neopres://deck/${slide.path}`;
+
       item.innerHTML = `
-        <span class="slide-item-num">${idx + 1}</span>
-        <span class="slide-item-title">${slide.title || 'Slide'}</span>
+        <div class="slide-item-header">
+          <span class="slide-item-num">${idx + 1}</span>
+          <span class="slide-item-title" title="${this.escapeHtml(slide.title || 'Slide')}">${this.escapeHtml(slide.title || 'Slide')}</span>
+        </div>
+        <div class="slide-item-preview-container">
+          <div class="slide-item-preview-placeholder">📽️</div>
+          <div class="slide-item-preview-scaler">
+            <iframe class="slide-item-preview-frame" src="${slideUrl}" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1" allow="autoplay 'none'"></iframe>
+          </div>
+          <div class="slide-item-preview-overlay" title="Slide ${idx + 1}: ${this.escapeHtml(slide.title || 'Slide')}"></div>
+        </div>
       `;
+
+      // Mute audio and video in sidebar previews
+      const frame = item.querySelector('.slide-item-preview-frame') as HTMLIFrameElement;
+      if (frame) {
+        frame.addEventListener('load', () => {
+          try {
+            const doc = frame.contentDocument;
+            if (doc) {
+              doc.querySelectorAll('audio, video').forEach((media) => {
+                (media as HTMLMediaElement).muted = true;
+              });
+            }
+          } catch {
+            // ignore
+          }
+        });
+      }
+
       item.addEventListener('click', () => this.goToSlide(idx));
+      this.setupSidebarDragAndDrop(item, idx);
+
       this.slidesListEl.appendChild(item);
+    });
+
+    requestAnimationFrame(() => {
+      this.updateSidebarScales();
+      requestAnimationFrame(() => this.updateSidebarScales());
+    });
+  }
+
+  private setupSidebarDragAndDrop(item: HTMLElement, index: number): void {
+    item.addEventListener('dragstart', (e) => {
+      this.sidebarDraggedIndex = index;
+      item.classList.add('dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(index));
+      }
+    });
+
+    item.addEventListener('dragend', () => {
+      this.sidebarDraggedIndex = null;
+      this.slidesListEl.querySelectorAll('.slide-item').forEach((it) => {
+        it.classList.remove('dragging', 'drag-over');
+      });
+    });
+
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'move';
+      }
+      if (this.sidebarDraggedIndex !== null && this.sidebarDraggedIndex !== index) {
+        item.classList.add('drag-over');
+      }
+    });
+
+    item.addEventListener('dragleave', () => {
+      item.classList.remove('drag-over');
+    });
+
+    item.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      item.classList.remove('drag-over');
+      const fromIdx = this.sidebarDraggedIndex;
+      const toIdx = index;
+      if (fromIdx !== null && fromIdx !== toIdx && this.manifest) {
+        await this.reorderSlides(fromIdx, toIdx);
+      }
     });
   }
 
@@ -338,18 +538,30 @@ class PresentationApp {
   reloadCurrentSlide(): void {
     if (!this.manifest || !this.manifest.slides[this.currentIndex]) return;
     const cur = this.manifest.slides[this.currentIndex];
-    this.slideFrameEl.src = `neopres://deck/${cur.path}?t=${Date.now()}`;
+    const url = `neopres://deck/${cur.path}?t=${Date.now()}`;
+    this.slideFrameEl.src = url;
+
+    // Also refresh the thumbnail in the sidebar
+    const currentItem = this.slidesListEl.children[this.currentIndex];
+    if (currentItem) {
+      const frame = currentItem.querySelector('.slide-item-preview-frame') as HTMLIFrameElement;
+      if (frame) {
+        frame.src = url;
+      }
+    }
     this.syncPresenterState();
   }
 
   private async reloadManifest(): Promise<void> {
     if (!this.deckPath) return;
-    // Manifest reload
-    const res = await window.electronAPI.openFolderDialog();
-    if (res) {
-      this.manifest = res.manifest;
+    const manifest = await window.electronAPI.getManifest();
+    if (manifest) {
+      this.manifest = manifest;
       this.renderSidebarSlides();
       this.goToSlide(this.currentIndex);
+      if (!this.overviewModalEl.classList.contains('hidden')) {
+        this.renderOverviewGrid();
+      }
     }
   }
 
@@ -423,10 +635,17 @@ class PresentationApp {
   toggleOverview(force?: boolean): void {
     const show = force !== undefined ? force : this.overviewModalEl.classList.contains('hidden');
     if (show && this.manifest) {
+      this.selectedOverviewIndex = this.currentIndex;
       this.renderOverviewGrid();
       this.overviewModalEl.classList.remove('hidden');
+      requestAnimationFrame(() => {
+        this.updateOverviewScales();
+        requestAnimationFrame(() => this.updateOverviewScales());
+      });
     } else {
       this.overviewModalEl.classList.add('hidden');
+      // Clean up iframes to release background CPU / GPU while presenting
+      this.overviewGridEl.innerHTML = '';
     }
   }
 
@@ -434,19 +653,180 @@ class PresentationApp {
     if (!this.manifest) return;
     this.overviewGridEl.innerHTML = '';
 
+    const total = this.manifest.slides.length;
+    if (this.overviewCountBadgeEl) {
+      this.overviewCountBadgeEl.textContent = `${total} slide${total === 1 ? '' : 's'}`;
+    }
+
+    const baseW = this.manifest.customWidth || 1920;
+    const baseH = this.manifest.customHeight || 1080;
+    this.overviewGridEl.style.setProperty('--slide-base-w', `${baseW}px`);
+    this.overviewGridEl.style.setProperty('--slide-base-h', `${baseH}px`);
+    this.overviewGridEl.style.setProperty('--slide-aspect-ratio', `${baseW} / ${baseH}`);
+
     this.manifest.slides.forEach((slide, idx) => {
       const card = document.createElement('div');
-      card.className = `overview-card ${idx === this.currentIndex ? 'active' : ''}`;
+      card.className = `overview-card ${idx === this.selectedOverviewIndex ? 'active' : ''}`;
+      card.dataset.index = String(idx);
+      card.setAttribute('draggable', 'true');
+
+      // Notes badge if notes exist
+      const notesBadge = slide.notes && slide.notes.trim()
+        ? `<span class="card-badge-notes" title="Speaker Notes: ${this.escapeHtml(slide.notes.slice(0, 120))}${slide.notes.length > 120 ? '...' : ''}">📝</span>`
+        : '';
+
+      const activeBadge = idx === this.currentIndex
+        ? `<span class="card-badge-active">Current</span>`
+        : '';
+
+      const slideUrl = `neopres://deck/${slide.path}`;
+
       card.innerHTML = `
-        <span class="overview-card-num">${idx + 1}</span>
-        <div class="overview-card-title">${slide.title || 'Slide'}</div>
+        <div class="card-preview-container">
+          <div class="card-preview-placeholder">📽️</div>
+          <div class="card-preview-scaler">
+            <iframe class="card-preview-frame" src="${slideUrl}" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1" allow="autoplay 'none'"></iframe>
+          </div>
+          <div class="card-preview-overlay" title="Slide ${idx + 1}: ${this.escapeHtml(slide.title || 'Slide')}"></div>
+        </div>
+        <div class="card-footer">
+          <div class="card-meta">
+            <span class="card-num">${idx + 1}</span>
+            <span class="card-title" title="${this.escapeHtml(slide.title || 'Slide')}">${this.escapeHtml(slide.title || 'Slide')}</span>
+          </div>
+          <div class="card-badges">
+            ${notesBadge}
+            ${activeBadge}
+          </div>
+        </div>
       `;
+
+      // Mute audio and video in previews to prevent background noise
+      const frame = card.querySelector('.card-preview-frame') as HTMLIFrameElement;
+      if (frame) {
+        frame.addEventListener('load', () => {
+          try {
+            const doc = frame.contentDocument;
+            if (doc) {
+              doc.querySelectorAll('audio, video').forEach((media) => {
+                (media as HTMLMediaElement).muted = true;
+              });
+            }
+          } catch {
+            // ignore cross-origin if any
+          }
+        });
+      }
+
+      // Click to navigate and close sorter
       card.addEventListener('click', () => {
         this.goToSlide(idx);
         this.toggleOverview(false);
       });
+
+      // Drag and drop reordering
+      this.setupCardDragAndDrop(card, idx);
+
       this.overviewGridEl.appendChild(card);
     });
+
+    // Scroll selected card into view and update scaling
+    requestAnimationFrame(() => {
+      this.updateOverviewScales();
+      const activeCard = this.overviewGridEl.querySelector('.overview-card.active') as HTMLElement;
+      if (activeCard) {
+        activeCard.scrollIntoView({ block: 'nearest' });
+      }
+      requestAnimationFrame(() => this.updateOverviewScales());
+    });
+  }
+
+  private setupCardDragAndDrop(card: HTMLElement, index: number): void {
+    card.addEventListener('dragstart', (e) => {
+      this.draggedIndex = index;
+      card.classList.add('dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(index));
+      }
+    });
+
+    card.addEventListener('dragend', () => {
+      this.draggedIndex = null;
+      this.overviewGridEl.querySelectorAll('.overview-card').forEach((c) => {
+        c.classList.remove('dragging', 'drag-over');
+      });
+    });
+
+    card.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'move';
+      }
+      if (this.draggedIndex !== null && this.draggedIndex !== index) {
+        card.classList.add('drag-over');
+      }
+    });
+
+    card.addEventListener('dragleave', () => {
+      card.classList.remove('drag-over');
+    });
+
+    card.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      const fromIdx = this.draggedIndex;
+      const toIdx = index;
+      if (fromIdx !== null && fromIdx !== toIdx && this.manifest) {
+        await this.reorderSlides(fromIdx, toIdx);
+      }
+    });
+  }
+
+  private async reorderSlides(fromIndex: number, toIndex: number): Promise<void> {
+    if (!this.manifest) return;
+    const slides = this.manifest.slides;
+    if (fromIndex < 0 || fromIndex >= slides.length || toIndex < 0 || toIndex >= slides.length) return;
+
+    // Preserve the currently active slide reference
+    const currentSlide = slides[this.currentIndex];
+
+    // Move slide
+    const [moved] = slides.splice(fromIndex, 1);
+    slides.splice(toIndex, 0, moved);
+
+    // Update currentIndex to follow currentSlide
+    const newCurrentIndex = slides.indexOf(currentSlide);
+    if (newCurrentIndex !== -1) {
+      this.currentIndex = newCurrentIndex;
+    }
+    this.selectedOverviewIndex = toIndex;
+
+    // Save manifest to file
+    await window.electronAPI.saveManifest(this.manifest);
+
+    // Update UI
+    this.renderSidebarSlides();
+    this.renderOverviewGrid();
+    this.syncPresenterState();
+  }
+
+  private highlightOverviewCard(index: number): void {
+    const cards = this.overviewGridEl.querySelectorAll('.overview-card');
+    cards.forEach((c, idx) => {
+      if (idx === index) {
+        c.classList.add('active');
+        c.scrollIntoView({ block: 'nearest' });
+      } else {
+        c.classList.remove('active');
+      }
+    });
+  }
+
+  private escapeHtml(text: string): string {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   toggleShortcuts(force?: boolean): void {

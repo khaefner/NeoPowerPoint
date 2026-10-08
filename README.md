@@ -22,7 +22,7 @@ NeoPowerPoint lets you create presentations using standard web technologies. Bec
   - Real wall clock
   - Speaker notes with adjustable font size
   - Quick-jump slide thumbnail strip
-- **Slide Overview Grid**: Bird's-eye thumbnail matrix (`O` or `Esc`) to jump directly to any slide during Q&A.
+- **Slide Sorter View**: Bird's-eye grid matrix (`O` or `Esc`) featuring real live HTML/JS previews of each slide, thumbnail zoom scaling controls (S / M / L), and drag-and-drop slide reordering.
 - **Live File Watcher**: Edits to HTML, CSS, or JS files in your favorite editor (e.g., VS Code) immediately hot-reload the current slide without resetting presentation state.
 
 ---
@@ -110,7 +110,7 @@ my-presentation/
 | `W` | Toggle **Windowed Presentation Mode** (fills current window) |
 | `F11` / `F` | Toggle **Fullscreen Mode** |
 | `P` | Open **Presenter View** (speaker notes + timer + next slide preview) |
-| `O` / `Esc` | Toggle **Slide Overview Grid** |
+| `O` / `Esc` | Toggle **Slide Sorter View** (live slide previews & reordering) |
 | `R` | Reload current slide (live refresh) |
 | `S` | Toggle slide sidebar manager |
 | `?` | Show keyboard shortcuts cheat sheet |

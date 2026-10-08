@@ -35,9 +35,9 @@
       </div>
 
       <div class="toolbar-right">
-        <button id="btn-overview-grid" class="btn btn-secondary" title="Slide Overview Grid (O)">
+        <button id="btn-overview-grid" class="btn btn-secondary" title="Slide Sorter (O)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-          Overview
+          Slide Sorter
         </button>
 
         <button id="btn-windowed-mode" class="btn btn-primary" title="Windowed Presentation Mode (W) — Fills window cleanly for Zoom/Teams">
@@ -129,15 +129,29 @@
       </section>
     </main>
 
-    <!-- Slide Overview Grid Overlay -->
+    <!-- Slide Sorter Modal -->
     <div id="overview-modal" class="modal-overlay hidden">
       <div class="overview-container">
         <div class="overview-header">
-          <h2>Slide Overview</h2>
-          <button id="btn-close-overview" class="btn-icon">✕</button>
+          <div class="overview-header-left">
+            <h2 class="overview-header-title">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+              Slide Sorter
+            </h2>
+            <span id="overview-count-badge" class="overview-count-badge">0 slides</span>
+            <span class="overview-hint">Click slide to jump • Drag to reorder</span>
+          </div>
+          <div class="overview-header-controls">
+            <div class="overview-size-buttons">
+              <button id="btn-sorter-size-sm" class="btn-size-toggle" title="Small Thumbnails">S</button>
+              <button id="btn-sorter-size-md" class="btn-size-toggle active" title="Medium Thumbnails">M</button>
+              <button id="btn-sorter-size-lg" class="btn-size-toggle" title="Large Thumbnails">L</button>
+            </div>
+            <button id="btn-close-overview" class="btn-icon" title="Close Slide Sorter (Esc)">✕</button>
+          </div>
         </div>
         <div id="overview-grid" class="overview-grid">
-          <!-- Slide cards populated dynamically -->
+          <!-- Slide cards populated dynamically with live previews -->
         </div>
       </div>
     </div>
@@ -156,7 +170,7 @@
           <div class="shortcut-item"><kbd>W</kbd><span>Toggle Windowed Presentation Mode (fills window)</span></div>
           <div class="shortcut-item"><kbd>F11</kbd> / <kbd>F</kbd><span>Toggle Fullscreen Mode</span></div>
           <div class="shortcut-item"><kbd>P</kbd><span>Open Presenter View (notes + timer)</span></div>
-          <div class="shortcut-item"><kbd>O</kbd> / <kbd>Esc</kbd><span>Slide Overview Grid</span></div>
+          <div class="shortcut-item"><kbd>O</kbd> / <kbd>Esc</kbd><span>Slide Sorter (Grid Overview)</span></div>
           <div class="shortcut-item"><kbd>R</kbd><span>Reload Slide (Live Edit Refresh)</span></div>
           <div class="shortcut-item"><kbd>S</kbd><span>Toggle Slide Manager Sidebar</span></div>
           <div class="shortcut-item"><kbd>?</kbd><span>Show Keyboard Shortcuts</span></div>
