@@ -147,8 +147,14 @@ Fidelity guidance:
 - Copy `notes` into `deck.json` verbatim.
 - Copy only the media files actually referenced from `extract/media/` to `assets/media/`.
 
-### 6. Write `deck.json`, then validate
+### 6. Generate deck and manifest, then validate
 
+You can use the helper script or generate custom HTML:
+```bash
+python3 <skill-dir>/scripts/generate_deck.py --extract ./pptx-extract/extract.json --out ./my-deck
+```
+
+Then validate the deck:
 ```bash
 python3 <skill-dir>/scripts/validate_deck.py ./my-deck
 ```

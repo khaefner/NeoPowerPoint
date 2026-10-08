@@ -36,6 +36,7 @@ NS = {
     'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
     'c': 'http://schemas.openxmlformats.org/drawingml/2006/chart',
     'rel': 'http://schemas.openxmlformats.org/package/2006/relationships',
+    'asvg': 'http://schemas.microsoft.com/office/drawing/2016/SVG/main',
 }
 EMU_PER_PT = 12700
 DEFAULT_CLRMAP = {'bg1': 'lt1', 'tx1': 'dk1', 'bg2': 'lt2', 'tx2': 'dk2'}
@@ -187,6 +188,12 @@ class Ctx:
         blip = blipfill.find('a:blip', NS)
         if blip is None:
             return None
+        # Check for modern SVG blip in extension list
+        svg = blip.find('.//asvg:svgBlip', NS)
+        if svg is not None:
+            rid = svg.get(q('r', 'embed'))
+            if rid and rid in rels and rels[rid]['target'] in self.pkg.names:
+                return 'media/' + self.copy_media(rels[rid]['target'])
         rid = blip.get(q('r', 'embed'))
         if rid and rid in rels and rels[rid]['target'] in self.pkg.names:
             return 'media/' + self.copy_media(rels[rid]['target'])
@@ -589,6 +596,20 @@ def background(ctx, root, rels):
     return None
 
 
+def load_theme(pkg, theme_part):
+    colors, fonts = {}, {}
+    th = pkg.xml(theme_part) if theme_part else None
+    if th is not None:
+        for c in th.find('.//a:clrScheme', NS):
+            ch = c[0]
+            colors[local(c)] = '#' + (ch.get('val') if local(ch) == 'srgbClr' else ch.get('lastClr', '000000')).lower()
+        fs = th.find('.//a:fontScheme', NS)
+        if fs is not None:
+            fonts = {'+mj-lt': fs.find('a:majorFont/a:latin', NS).get('typeface'),
+                     '+mn-lt': fs.find('a:minorFont/a:latin', NS).get('typeface')}
+    return colors, fonts
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('pptx')
@@ -600,37 +621,36 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     pkg = Pkg(args.pptx)
     ctx = Ctx(pkg, args.width, args.out)
-
-    # theme
-    theme_part = next((r['target'] for r in ctx.pres_rels.values() if r['type'] == 'theme'), 'ppt/theme/theme1.xml')
-    th = pkg.xml(theme_part)
-    if th is not None:
-        for c in th.find('.//a:clrScheme', NS):
-            n = local(c)
-            ch = c[0]
-            ctx.theme[n] = '#' + (ch.get('val') if local(ch) == 'srgbClr' else ch.get('lastClr', '000000')).lower()
-        fs = th.find('.//a:fontScheme', NS)
-        if fs is not None:
-            major = fs.find('a:majorFont/a:latin', NS).get('typeface')
-            minor = fs.find('a:minorFont/a:latin', NS).get('typeface')
-            ctx.fonts = {'+mj-lt': major, '+mn-lt': minor}
-
-    # masters / layouts
-    master_part = next((r['target'] for r in pkg.rels('ppt/presentation.xml').values() if r['type'] == 'slideMaster'), None)
-    master = pkg.xml(master_part)
-    ctx.master_root = master
-    cm = master.find('p:clrMap', NS)
-    if cm is not None:
-        ctx.clrmap.update({k: v for k, v in cm.attrib.items()})
-    master_rels = pkg.rels(master_part)
-    tx = master.find('p:txStyles', NS)
-    master_txstyles = {local(c): c for c in tx} if tx is not None else {}
-
     full_tf = (0, 0, 1, 1)
-    master_shapes = []
-    walk_tree(ctx, master.find('p:cSld/p:spTree', NS), master_rels, None, master, full_tf, 'master', master_txstyles, master_shapes)
-    # master placeholders (title, body...) are templates, not decor: drop them
-    master_shapes = [s for s in master_shapes if 'placeholder' not in s]
+
+    # A deck can contain SEVERAL slide masters, each with its own theme, colour map,
+    # text styles and decor. Everything below is resolved per master.
+    masters = {}
+
+    def activate(mpart):
+        """Switch ctx to the theme/colour map of a master and return its record."""
+        m = masters.get(mpart)
+        if m is None:
+            root = pkg.xml(mpart)
+            mrels = pkg.rels(mpart)
+            theme_part = next((r['target'] for r in mrels.values() if r['type'] == 'theme'), None)
+            colors, fonts = load_theme(pkg, theme_part)
+            clrmap = dict(DEFAULT_CLRMAP)
+            cm = root.find('p:clrMap', NS)
+            if cm is not None:
+                clrmap.update(dict(cm.attrib))
+            tx = root.find('p:txStyles', NS)
+            m = {'part': mpart, 'root': root, 'rels': mrels, 'colors': colors, 'fonts': fonts, 'clrmap': clrmap,
+                 'txstyles': {local(c): c for c in tx} if tx is not None else {}}
+            masters[mpart] = m
+            ctx.theme, ctx.fonts, ctx.clrmap = colors, fonts, clrmap
+            shapes = []
+            walk_tree(ctx, root.find('p:cSld/p:spTree', NS), mrels, None, root, full_tf, 'master', m['txstyles'], shapes)
+            # master placeholders (title, body...) are templates, not decor: drop them
+            m['decor_shapes'] = [x for x in shapes if 'placeholder' not in x]
+            m['background'] = background(ctx, root, mrels)
+        ctx.theme, ctx.fonts, ctx.clrmap = m['colors'], m['fonts'], m['clrmap']
+        return m
 
     layouts = {}
 
@@ -639,11 +659,14 @@ def main():
             return layouts[part]
         root = pkg.xml(part)
         lrels = pkg.rels(part)
+        mpart = next(r['target'] for r in lrels.values() if r['type'] == 'slideMaster')
+        m = activate(mpart)
         shapes = []
-        walk_tree(ctx, root.find('p:cSld/p:spTree', NS), lrels, None, master, full_tf, 'layout', master_txstyles, shapes)
-        shapes = [s for s in shapes if 'placeholder' not in s]
+        walk_tree(ctx, root.find('p:cSld/p:spTree', NS), lrels, None, m['root'], full_tf, 'layout', m['txstyles'], shapes)
+        shapes = [x for x in shapes if 'placeholder' not in x]
         layouts[part] = {
             'name': root.find('p:cSld', NS).get('name', ''),
+            'master': mpart,
             'show_master_shapes': root.get('showMasterSp', '1') != '0',
             'background': background(ctx, root, lrels),
             'decor_shapes': shapes,
@@ -653,15 +676,15 @@ def main():
 
     # slides in presentation order
     slides_out = []
-    sld_ids = ctx.pres.findall('p:sldIdLst/p:sldId', NS)
-    for i, sid in enumerate(sld_ids, 1):
+    for i, sid in enumerate(ctx.pres.findall('p:sldIdLst/p:sldId', NS), 1):
         part = ctx.pres_rels[sid.get(q('r', 'id'))]['target']
         root = pkg.xml(part)
         rels = pkg.rels(part)
         layout_part = next((r['target'] for r in rels.values() if r['type'] == 'slideLayout'), None)
-        layout = load_layout(layout_part) if layout_part else None
+        layout = load_layout(layout_part)
+        m = activate(layout['master'])
         shapes = []
-        walk_tree(ctx, root.find('p:cSld/p:spTree', NS), rels, layout['_root'] if layout else None, master, full_tf, 'slide', master_txstyles, shapes)
+        walk_tree(ctx, root.find('p:cSld/p:spTree', NS), rels, layout['_root'], m['root'], full_tf, 'slide', m['txstyles'], shapes)
         notes = None
         nrel = next((r['target'] for r in rels.values() if r['type'] == 'notesSlide'), None)
         if nrel:
@@ -675,15 +698,17 @@ def main():
             notes = '\n'.join(lines).strip() or None
         title = next((''.join(r['text'] for p in s['text']['paragraphs'] for r in p.get('runs', []))
                       for s in shapes if s.get('placeholder') in ('title', 'ctrTitle') and 'text' in s), '')
+        own_bg = background(ctx, root, rels)
         slides_out.append({
             'number': i,
             'source_part': part,
             'title': title.strip(),
             'layout': layout_part,
-            'show_master_shapes': root.get('showMasterSp', '1') != '0' and (layout['show_master_shapes'] if layout else True),
+            'master': layout['master'],
+            'show_master_shapes': root.get('showMasterSp', '1') != '0' and layout['show_master_shapes'],
             'hidden': root.get('show') == '0',
-            'background': background(ctx, root, rels),
-            'effective_background': background(ctx, root, rels) or (layout['background'] if layout else None) or background(ctx, master, master_rels),
+            'background': own_bg,
+            'effective_background': own_bg or layout['background'] or m['background'],
             'notes': notes,
             'shapes': shapes,
         })
@@ -691,20 +716,25 @@ def main():
     for l in layouts.values():
         l.pop('_root', None)
 
+    out_masters = {}
+    for k, m in masters.items():
+        out_masters[k] = {'theme': {'colors': m['colors'],
+                                    'fonts': {'heading': m['fonts'].get('+mj-lt'), 'body': m['fonts'].get('+mn-lt')},
+                                    'color_map': m['clrmap']},
+                          'background': m['background'], 'decor_shapes': m['decor_shapes']}
     result = {
         'source': os.path.basename(args.pptx),
         'canvas': {'width': ctx.canvas_w, 'height': ctx.canvas_h, 'source_emu': [ctx.cx, ctx.cy],
                    'note': 'All x/y/w/h/size_px values are in this canvas coordinate system.'},
-        'theme': {'colors': ctx.theme, 'fonts': {'heading': ctx.fonts.get('+mj-lt'), 'body': ctx.fonts.get('+mn-lt')},
-                  'color_map': ctx.clrmap},
-        'master': {'background': background(ctx, master, master_rels), 'decor_shapes': master_shapes},
+        'masters': out_masters,
         'layouts': layouts,
         'slides': slides_out,
     }
     with open(os.path.join(args.out, 'extract.json'), 'w', encoding='utf-8') as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
-    print('Wrote %s (%d slides, %d media files, canvas %dx%d)' % (
-        os.path.join(args.out, 'extract.json'), len(slides_out), len(ctx.media), ctx.canvas_w, ctx.canvas_h))
+    print('Wrote %s (%d slides, %d masters, %d layouts, %d media files, canvas %dx%d)' % (
+        os.path.join(args.out, 'extract.json'), len(slides_out), len(masters), len(layouts), len(ctx.media),
+        ctx.canvas_w, ctx.canvas_h))
 
     if args.render:
         soffice = shutil.which('soffice') or shutil.which('libreoffice')
