@@ -270,7 +270,45 @@ class PresentationApp {
     });
   }
 
+  private setupIframeKeyDownBridge(iframeDoc: Document): void {
+    iframeDoc.addEventListener('keydown', (e: KeyboardEvent) => {
+      // If editing text, stop navigation keys from bubbling up
+      const activeEl = iframeDoc.activeElement as HTMLElement;
+      if (activeEl && activeEl.isContentEditable) {
+        if (['Space', ' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+          e.stopPropagation();
+        }
+
+        // Handle bold and italic
+        if (e.ctrlKey || e.metaKey) {
+          if (e.key === 'b' || e.key === 'B') {
+            e.preventDefault();
+            iframeDoc.execCommand('bold');
+          } else if (e.key === 'i' || e.key === 'I') {
+            e.preventDefault();
+            iframeDoc.execCommand('italic');
+          }
+        }
+      }
+
+      this.handleKeyDown(e);
+    });
+  }
+
   private handleKeyDown(e: KeyboardEvent): void {
+    if (this.isEditMode) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        this.saveSlideHtml();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'e' || e.key === 'E')) {
+        e.preventDefault();
+        this.toggleEditMode();
+        return;
+      }
+    }
+
     // Ignore navigation shortcuts when editing text notes
     const activeEl = document.activeElement;
     if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
@@ -511,6 +549,16 @@ class PresentationApp {
     // Update Iframe Source
     const slideUrl = `neopres://deck/${currentSlide.path}`;
     this.slideFrameEl.src = slideUrl;
+
+    this.slideFrameEl.onload = () => {
+      const doc = this.slideFrameEl.contentDocument;
+      if (doc) {
+        this.setupIframeKeyDownBridge(doc);
+        if (this.isEditMode) {
+          this.enableEditModeFeatures();
+        }
+      }
+    };
 
     // Update Sidebar Selection & Notes
     this.updateSidebarSelection();
@@ -835,6 +883,178 @@ class PresentationApp {
       this.shortcutsModalEl.classList.remove('hidden');
     } else {
       this.shortcutsModalEl.classList.add('hidden');
+    }
+  }
+
+  toggleEditMode(): void {
+    this.isEditMode = !this.isEditMode;
+    const btnToggle = document.getElementById('btn-toggle-edit-mode')!;
+    const btnSave = document.getElementById('btn-save-slide')!;
+
+    if (this.isEditMode) {
+      btnToggle.classList.add('active');
+      btnToggle.style.backgroundColor = 'var(--accent-primary)';
+      btnToggle.style.color = '#fff';
+      btnSave.classList.remove('hidden');
+      this.enableEditModeFeatures();
+    } else {
+      btnToggle.classList.remove('active');
+      btnToggle.style.backgroundColor = '';
+      btnToggle.style.color = '';
+      btnSave.classList.add('hidden');
+      this.disableEditModeFeatures();
+    }
+  }
+
+  private enableEditModeFeatures(): void {
+    const doc = this.slideFrameEl.contentDocument;
+    if (!doc) return;
+
+    // Make text elements contenteditable
+    const textElements = doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, span, .tb, .textbox, .card, .title, .notes');
+    textElements.forEach(el => {
+      (el as HTMLElement).setAttribute('contenteditable', 'true');
+      (el as HTMLElement).classList.add('editor-editable-text');
+    });
+
+    // Calculate scale factor using bounding boxes as requested
+    const scaleFactor = this.slideFrameEl.getBoundingClientRect().width / this.slideFrameEl.offsetWidth;
+    this.currentScaleFactor = scaleFactor;
+
+    // Make positioned elements draggable
+    const positionedElements = doc.querySelectorAll('.abs, .tb, img, .pic, .editor-draggable, [style*="position: absolute"], [style*="position: fixed"]');
+    positionedElements.forEach(el => {
+      const htmlEl = el as HTMLElement;
+      // Skip if it's already an editable text element, text editing takes precedence on mousedown
+      if (htmlEl.hasAttribute('contenteditable')) return;
+
+      htmlEl.classList.add('editor-draggable');
+
+      let isDragging = false;
+      let initialLeft = 0;
+      let initialTop = 0;
+
+      const onMouseDown = (e: MouseEvent) => {
+        if (!this.isEditMode) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        isDragging = true;
+
+        const style = window.getComputedStyle(htmlEl);
+        initialLeft = parseFloat(style.left) || 0;
+        initialTop = parseFloat(style.top) || 0;
+
+        htmlEl.classList.add('editor-selected');
+
+        const onMouseMove = (moveEvent: MouseEvent) => {
+          if (!isDragging) return;
+          moveEvent.preventDefault();
+          moveEvent.stopPropagation();
+
+          // Divide movement by scale factor for 1:1 tracking
+          const dx = moveEvent.movementX / this.currentScaleFactor;
+          const dy = moveEvent.movementY / this.currentScaleFactor;
+
+          initialLeft += dx;
+          initialTop += dy;
+          htmlEl.style.left = `${initialLeft}px`;
+          htmlEl.style.top = `${initialTop}px`;
+        };
+
+        const onMouseUp = (upEvent: MouseEvent) => {
+          isDragging = false;
+          htmlEl.classList.remove('editor-selected');
+          doc.removeEventListener('mousemove', onMouseMove, true);
+          doc.removeEventListener('mouseup', onMouseUp, true);
+        };
+
+        doc.addEventListener('mousemove', onMouseMove, true);
+        doc.addEventListener('mouseup', onMouseUp, true);
+      };
+
+      (htmlEl as any)._editorDragHandler = onMouseDown;
+      htmlEl.addEventListener('mousedown', onMouseDown);
+    });
+
+    // Inject temporary styles for outlines
+    let styleEl = doc.getElementById('neo-editor-styles');
+    if (!styleEl) {
+      styleEl = doc.createElement('style');
+      styleEl.id = 'neo-editor-styles';
+      styleEl.textContent = `
+        .editor-editable-text { outline: 1px dashed rgba(56, 189, 248, 0.5); }
+        .editor-editable-text:focus { outline: 2px solid #38bdf8; background: rgba(56, 189, 248, 0.1); }
+        .editor-draggable { cursor: move; }
+        .editor-draggable:hover { outline: 1px dashed rgba(248, 113, 113, 0.5); }
+        .editor-selected { outline: 2px solid #f87171 !important; z-index: 9999; }
+      `;
+      doc.head.appendChild(styleEl);
+    }
+  }
+
+  private disableEditModeFeatures(): void {
+    const doc = this.slideFrameEl.contentDocument;
+    if (!doc) return;
+
+    doc.querySelectorAll('.editor-editable-text').forEach(el => {
+      (el as HTMLElement).removeAttribute('contenteditable');
+      (el as HTMLElement).classList.remove('editor-editable-text');
+    });
+
+    doc.querySelectorAll('.editor-draggable').forEach(el => {
+      const htmlEl = el as HTMLElement;
+      htmlEl.classList.remove('editor-draggable', 'editor-selected');
+      if ((htmlEl as any)._editorDragHandler) {
+        htmlEl.removeEventListener('mousedown', (htmlEl as any)._editorDragHandler);
+        delete (htmlEl as any)._editorDragHandler;
+      }
+    });
+
+    const styleEl = doc.getElementById('neo-editor-styles');
+    if (styleEl) styleEl.remove();
+  }
+
+  private async saveSlideHtml(): Promise<void> {
+    if (!this.manifest || !this.manifest.slides[this.currentIndex]) return;
+    const doc = this.slideFrameEl.contentDocument;
+    if (!doc) return;
+
+    // Clone the document to strip out editor attributes safely
+    const clone = doc.documentElement.cloneNode(true) as HTMLElement;
+
+    clone.querySelectorAll('.editor-editable-text').forEach(el => {
+      el.removeAttribute('contenteditable');
+      el.classList.remove('editor-editable-text');
+      if (el.className === '') el.removeAttribute('class');
+    });
+
+    clone.querySelectorAll('.editor-draggable').forEach(el => {
+      el.classList.remove('editor-draggable', 'editor-selected');
+      if (el.className === '') el.removeAttribute('class');
+    });
+
+    const styleEl = clone.querySelector('#neo-editor-styles');
+    if (styleEl) styleEl.remove();
+
+    // Reconstruct with original doctype if possible, otherwise use standard html5
+    let doctypeString = '<!DOCTYPE html>\n';
+    if (doc.doctype) {
+      doctypeString = `<!DOCTYPE ${doc.doctype.name}` +
+        (doc.doctype.publicId ? ` PUBLIC "${doc.doctype.publicId}"` : '') +
+        (doc.doctype.systemId ? ` "${doc.doctype.systemId}"` : '') +
+        '>\n';
+    }
+
+    const htmlContent = doctypeString + clone.outerHTML;
+    const currentSlide = this.manifest.slides[this.currentIndex];
+
+    const success = await window.electronAPI.saveSlideHtml(currentSlide.path, htmlContent);
+
+    if (success) {
+      this.flashLiveBadge(); // Provide visual feedback for save
+      // Ensure the thumbnail is updated after saving
+      this.reloadCurrentSlide();
     }
   }
 
