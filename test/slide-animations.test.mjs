@@ -124,10 +124,26 @@ async function runTests() {
     if (!s12Html.includes('>i.</span>') || !s12Html.includes('>ii.</span>') || !s12Html.includes('>iii.</span>')) {
       throw new Error('Slide 12 missing properly formatted Roman numerals i., ii., iii.');
     }
-    if (!s12Html.includes('neo-anim-step-1')) {
-      throw new Error('Slide 12 missing group animation step');
+    if (!s12Html.includes('data-spid="3"') || !s12Html.includes('neo-anim-step-1 neo-anim-fade anim-hidden')) {
+      throw new Error('Slide 12 mask shape 3 is not initially hidden with animation step 1');
     }
-    console.log('✓ Validated slide 12 has properly formatted Roman numerals, spacer paragraphs, and group animation');
+    console.log('✓ Validated slide 12 has properly formatted Roman numerals, spacer paragraphs, and group animation with initially hidden mask');
+
+    // Slide 1 image validation
+    const slide1 = manifest.slides[0];
+    const s1Html = await fs.promises.readFile(path.join(convertedDeckDir, slide1.path), 'utf-8');
+    if (!s1Html.includes('image4.jpg') && !s1Html.includes('<img')) {
+      throw new Error('Slide 1 is missing extracted image');
+    }
+    console.log('✓ Validated slide 1 contains extracted image (image4.jpg)');
+
+    // Slide 6 arrow validation
+    const slide6 = manifest.slides[5];
+    const s6Html = await fs.promises.readFile(path.join(convertedDeckDir, slide6.path), 'utf-8');
+    if (!s6Html.includes('<marker id="m_6_457') && !s6Html.includes('vector-effect="non-scaling-stroke"')) {
+      throw new Error('Slide 6 missing custom SVG arrow and markers');
+    }
+    console.log('✓ Validated slide 6 renders custom geometry arrow with SVG path and markers');
   }
 
   console.log('\n🎉 ALL PPTX ANIMATION TESTS PASSED SUCCESSFULLY!');

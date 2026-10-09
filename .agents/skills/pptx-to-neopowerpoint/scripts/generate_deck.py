@@ -430,6 +430,53 @@ def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
   <line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{line_col}" stroke-width="{lw:.1f}"{marker_attr}/>
 </svg>'''
 
+    # Handle Custom Geometry Paths (Freeforms, custom arrows, curved connectors)
+    if sh.get('paths'):
+        paths = sh['paths']
+        line_col = line.get('color', '#ffffff') if line else 'none'
+        lw = line.get('width_px', 1.0) if line else 1.0
+        fill_col = fill.get('color', 'none') if (fill and fill.get('type') == 'solid') else 'none'
+
+        anim_classes = ''
+        anim_attrs = f' data-spid="{spid}"' if spid else ''
+        if shape_anim:
+            st_num = shape_anim['step']
+            eff_name = shape_anim['effect']
+            eff_type = shape_anim['type']
+            anim_classes = f' neo-anim-target neo-anim-step-{st_num} neo-anim-{eff_name} anim-hidden'
+            anim_attrs += f' data-anim-step="{st_num}" data-anim-type="{eff_type}" data-anim-effect="{eff_name}"'
+
+        defs_list = []
+        path_attrs = []
+        head = line.get('head') if line else None
+        tail = line.get('tail') if line else None
+
+        mk_id_base = f"m_{slide_num}_{spid or int(x)}"
+        if head in ('triangle', 'arrow', 'stealth'):
+            head_id = f"{mk_id_base}_head"
+            defs_list.append(f'''<marker id="{head_id}" markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto-start-reverse">
+  <path d="M 0 1 L 8 4 L 0 7 z" fill="{line_col}"/>
+</marker>''')
+            path_attrs.append(f'marker-end="url(#{head_id})"')
+        if tail in ('triangle', 'arrow', 'stealth'):
+            tail_id = f"{mk_id_base}_tail"
+            defs_list.append(f'''<marker id="{tail_id}" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+  <path d="M 8 1 L 0 4 L 8 7 z" fill="{line_col}"/>
+</marker>''')
+            path_attrs.append(f'marker-start="url(#{tail_id})"')
+
+        defs_html = f"<defs>\n{''.join(defs_list)}\n</defs>\n" if defs_list else ""
+        extra_p_attr = (" " + " ".join(path_attrs)) if path_attrs else ""
+
+        svg_paths = []
+        for p_info in paths:
+            pw, ph = p_info.get('w', w), p_info.get('h', h)
+            d_val = p_info.get('d', '')
+            svg_paths.append(f'''<svg class="abs{anim_classes}" viewBox="0 0 {pw} {ph}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}>
+  {defs_html}<path d="{d_val}" fill="{fill_col}" stroke="{line_col}" stroke-width="{lw:.1f}" vector-effect="non-scaling-stroke"{extra_p_attr}/>
+</svg>''')
+        return '\n'.join(svg_paths)
+
     # Build Shape container (div)
     classes = ['abs']
     styles = [
@@ -589,6 +636,38 @@ def build_slide_anim_map(slide_data):
                         'effect': eff_name,
                         'dur_ms': dur_ms
                     }
+
+    # Detect unanimated solid background/mask shapes that sit behind animated entrance groups/shapes
+    # E.g. a solid white rectangle placed right behind an entrance box to cover underlying text when shown
+    shapes = slide_data.get('shapes', [])
+    for sh_idx, sh in enumerate(shapes):
+        sh_id = str(sh.get('id', ''))
+        if sh_id in shape_anims:
+            continue
+        fill = sh.get('fill') or {}
+        has_text = bool(sh.get('text') and any(not p.get('empty') for p in sh.get('text', {}).get('paragraphs', [])))
+        if fill.get('type') == 'solid' and not has_text:
+            sx, sy, sw, sh_h = sh.get('x', 0), sh.get('y', 0), sh.get('w', 0), sh.get('h', 0)
+            if sw > 0 and sh_h > 0:
+                # Look at subsequent shapes in z-order that are animated entrances
+                for next_sh in shapes[sh_idx + 1:]:
+                    next_id = str(next_sh.get('id', ''))
+                    next_anim = shape_anims.get(next_id)
+                    if next_anim and next_anim.get('type') == 'entr':
+                        nx, ny, nw, nh = next_sh.get('x', 0), next_sh.get('y', 0), next_sh.get('w', 0), next_sh.get('h', 0)
+                        # Check bounding overlap
+                        overlap_x = max(0, min(sx + sw, nx + nw) - max(sx, nx))
+                        overlap_y = max(0, min(sy + sh_h, ny + nh) - max(sy, ny))
+                        overlap_area = overlap_x * overlap_y
+                        next_area = nw * nh
+                        if next_area > 0 and overlap_area / next_area > 0.6:
+                            shape_anims[sh_id] = {
+                                'step': next_anim['step'],
+                                'type': next_anim['type'],
+                                'effect': next_anim['effect'],
+                                'dur_ms': next_anim['dur_ms']
+                            }
+                            break
 
     return shape_anims, para_anims
 

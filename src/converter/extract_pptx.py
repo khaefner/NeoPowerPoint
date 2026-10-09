@@ -76,6 +76,21 @@ class Pkg:
         return out
 
 
+def extract_metafile_image(data):
+    """Extract embedded raster image (JPEG or PNG) from an EMF/WMF binary."""
+    jpg_start = data.find(b'\xff\xd8\xff')
+    if jpg_start != -1:
+        jpg_end = data.rfind(b'\xff\xd9')
+        if jpg_end != -1 and jpg_end > jpg_start:
+            return data[jpg_start:jpg_end + 2], '.jpg'
+    png_start = data.find(b'\x89PNG\r\n\x1a\n')
+    if png_start != -1:
+        png_end = data.rfind(b'IEND')
+        if png_end != -1 and png_end > png_start:
+            return data[png_start:png_end + 8], '.png'
+    return None, None
+
+
 class Ctx:
     def __init__(self, pkg, canvas_w, out_dir):
         self.pkg = pkg
@@ -147,13 +162,22 @@ class Ctx:
             return self.media[zip_path]
         name = posixpath.basename(zip_path)
         base, ext = os.path.splitext(name)
-        final, i = name, 1
+        raw_data = self.pkg.z.read(zip_path)
+
+        # If EMF/WMF, check for embedded JPEG or PNG to ensure browser compatibility
+        if ext.lower() in ('.emf', '.wmf'):
+            extracted_img, new_ext = extract_metafile_image(raw_data)
+            if extracted_img and new_ext:
+                raw_data = extracted_img
+                ext = new_ext
+
+        final, i = '%s%s' % (base, ext), 1
         while final in self.media.values():
             final = '%s_%d%s' % (base, i, ext)
             i += 1
         os.makedirs(os.path.join(self.out_dir, 'media'), exist_ok=True)
         with open(os.path.join(self.out_dir, 'media', final), 'wb') as f:
-            f.write(self.pkg.z.read(zip_path))
+            f.write(raw_data)
         self.media[zip_path] = final
         return final
 
@@ -207,7 +231,14 @@ class Ctx:
         if not col:
             return None
         d = ln.find('a:prstDash', NS)
-        return {'color': col, 'width_px': self.px(int(ln.get('w', '12700'))), 'dash': d.get('val') if d is not None else 'solid'}
+        ret = {'color': col, 'width_px': self.px(int(ln.get('w', '12700'))), 'dash': d.get('val') if d is not None else 'solid'}
+        head = ln.find('a:headEnd', NS)
+        tail = ln.find('a:tailEnd', NS)
+        if head is not None and head.get('type') and head.get('type') != 'none':
+            ret['head'] = head.get('type')
+        if tail is not None and tail.get('type') and tail.get('type') != 'none':
+            ret['tail'] = tail.get('type')
+        return ret
 
 
 # ---------------------------------------------------------------- text ----
@@ -424,11 +455,42 @@ def parse_shape(ctx, sp, rels, chain, tf, source, master_txstyles):
     sppr = sp.find('p:spPr', NS)
     if kind == 'sp':
         geom = sppr.find('a:prstGeom', NS) if sppr is not None else None
-        out['geometry'] = geom.get('prst') if geom is not None else ('custom' if sppr is not None and sppr.find('a:custGeom', NS) is not None else 'rect')
+        cust = sppr.find('a:custGeom', NS) if sppr is not None else None
+        out['geometry'] = geom.get('prst') if geom is not None else ('custom' if cust is not None else 'rect')
         if geom is not None:
             adj = {g.get('name'): g.get('fmla') for g in geom.findall('a:avLst/a:gd', NS)}
             if adj:
                 out['geometry_adjust'] = adj
+        if cust is not None:
+            paths = []
+            for p_elem in cust.findall('a:pathLst/a:path', NS):
+                path_w = float(p_elem.get('w', '0'))
+                path_h = float(p_elem.get('h', '0'))
+                d_cmds = []
+                for child in p_elem:
+                    ctag = local(child)
+                    if ctag == 'moveTo':
+                        pt = child.find('a:pt', NS)
+                        if pt is not None:
+                            d_cmds.append(f"M {pt.get('x', '0')} {pt.get('y', '0')}")
+                    elif ctag == 'lnTo':
+                        pt = child.find('a:pt', NS)
+                        if pt is not None:
+                            d_cmds.append(f"L {pt.get('x', '0')} {pt.get('y', '0')}")
+                    elif ctag == 'cubicBezTo':
+                        pts = child.findall('a:pt', NS)
+                        if len(pts) == 3:
+                            d_cmds.append(f"C {pts[0].get('x', '0')} {pts[0].get('y', '0')}, {pts[1].get('x', '0')} {pts[1].get('y', '0')}, {pts[2].get('x', '0')} {pts[2].get('y', '0')}")
+                    elif ctag == 'quadBezTo':
+                        pts = child.findall('a:pt', NS)
+                        if len(pts) == 2:
+                            d_cmds.append(f"Q {pts[0].get('x', '0')} {pts[0].get('y', '0')}, {pts[1].get('x', '0')} {pts[1].get('y', '0')}")
+                    elif ctag == 'close':
+                        d_cmds.append("Z")
+                if d_cmds:
+                    paths.append({'w': path_w, 'h': path_h, 'd': ' '.join(d_cmds)})
+            if paths:
+                out['paths'] = paths
         fill = ctx.fill_of(sppr, rels)
         if fill is None and chain:
             for anc in reversed(chain):
