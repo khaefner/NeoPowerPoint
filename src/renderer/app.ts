@@ -1072,7 +1072,7 @@ class PresentationApp {
     (doc as any)._onEditClickCapture = onEditClickCapture;
     doc.addEventListener('click', onEditClickCapture, true);
 
-    // Track active selection and element for formatting toolbar
+    // Track active selection and element for formatting toolbar and selection handles
     const onSelectionOrFocus = () => {
       const sel = doc.defaultView?.getSelection();
       if (sel && sel.rangeCount > 0) {
@@ -1081,6 +1081,7 @@ class PresentationApp {
       const active = doc.activeElement as HTMLElement;
       if (active && (active.isContentEditable || active.classList.contains('editor-editable-text') || active.classList.contains('editor-draggable'))) {
         this.currentActiveElement = active;
+        this.renderSelectionOverlay(active);
       }
     };
     (doc as any)._onSelectionOrFocus = onSelectionOrFocus;
@@ -1091,32 +1092,239 @@ class PresentationApp {
     doc.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
       const editable = target.closest('.editor-editable-text, .editor-draggable, .tb, p, h1, h2, h3, h4, h5, h6, span, div') as HTMLElement;
-      if (editable) {
+      if (editable && editable !== doc.body && editable !== doc.documentElement) {
         this.currentActiveElement = editable;
+        this.renderSelectionOverlay(editable);
       }
     });
 
-    // Inject temporary styles for outlines
+    // Inject temporary styles for outlines and drag/resize handles
     let styleEl = doc.getElementById('neo-editor-styles');
     if (!styleEl) {
       styleEl = doc.createElement('style');
       styleEl.id = 'neo-editor-styles';
       styleEl.textContent = `
-        .editor-editable-text { outline: 1px dashed rgba(56, 189, 248, 0.5) !important; cursor: text !important; }
-        .editor-editable-text:focus { outline: 2px solid #38bdf8 !important; background: rgba(56, 189, 248, 0.1) !important; }
+        .editor-editable-text { outline: 1px dashed rgba(56, 189, 248, 0.4) !important; cursor: text !important; }
+        .editor-editable-text:focus { outline: 2px solid #38bdf8 !important; background: rgba(56, 189, 248, 0.08) !important; }
         .editor-draggable { cursor: move; }
-        .editor-draggable:hover { outline: 1px dashed rgba(248, 113, 113, 0.5); }
-        .editor-selected { outline: 2px solid #f87171 !important; z-index: 9999; }
+        .neo-move-handle {
+          position: absolute;
+          top: -30px;
+          left: 0;
+          background: #0284c7;
+          color: #ffffff;
+          padding: 3px 8px;
+          font-size: 11px;
+          font-weight: 700;
+          border-radius: 4px;
+          cursor: move;
+          pointer-events: auto;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          user-select: none;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+          white-space: nowrap;
+          z-index: 100000;
+        }
+        .neo-move-handle:hover { background: #0ea5e9; }
+        .neo-resize-handle {
+          position: absolute;
+          width: 10px;
+          height: 10px;
+          background: #ffffff;
+          border: 2px solid #0284c7;
+          border-radius: 2px;
+          pointer-events: auto;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+          z-index: 100000;
+          transition: transform 0.1s ease;
+        }
+        .neo-resize-handle:hover {
+          background: #0284c7;
+          border-color: #ffffff;
+          transform: scale(1.25);
+        }
+        .neo-rh-nw { top: -6px; left: -6px; cursor: nwse-resize; }
+        .neo-rh-n  { top: -6px; left: calc(50% - 5px); cursor: ns-resize; }
+        .neo-rh-ne { top: -6px; right: -6px; cursor: nesw-resize; }
+        .neo-rh-e  { top: calc(50% - 5px); right: -6px; cursor: ew-resize; }
+        .neo-rh-se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+        .neo-rh-s  { bottom: -6px; left: calc(50% - 5px); cursor: ns-resize; }
+        .neo-rh-sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+        .neo-rh-w  { top: calc(50% - 5px); left: -6px; cursor: ew-resize; }
       `;
       doc.head.appendChild(styleEl);
     }
     console.log(`[NeoEditor] Outlines and editor styles injected successfully.`);
   }
 
+  private renderSelectionOverlay(targetEl: HTMLElement): void {
+    const doc = this.slideFrameEl.contentDocument;
+    if (!doc || !this.isEditMode) return;
+    if (targetEl === doc.body || targetEl === doc.documentElement) return;
+
+    let overlay = doc.getElementById('neo-selection-overlay') as HTMLElement;
+    if (!overlay) {
+      overlay = doc.createElement('div');
+      overlay.id = 'neo-selection-overlay';
+      doc.body.appendChild(overlay);
+    }
+
+    const rect = targetEl.getBoundingClientRect();
+    const bodyRect = doc.body.getBoundingClientRect();
+    const left = rect.left - bodyRect.left;
+    const top = rect.top - bodyRect.top;
+    const width = rect.width;
+    const height = rect.height;
+
+    overlay.style.cssText = `
+      position: absolute;
+      left: ${left}px;
+      top: ${top}px;
+      width: ${width}px;
+      height: ${height}px;
+      border: 2px solid #0284c7;
+      pointer-events: none;
+      z-index: 99999;
+      box-sizing: border-box;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+    `;
+
+    overlay.innerHTML = `
+      <div class="neo-move-handle" title="Drag to move text box / element">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg>
+        <span>Move</span>
+      </div>
+      <div class="neo-resize-handle neo-rh-nw" data-dir="nw" title="Resize"></div>
+      <div class="neo-resize-handle neo-rh-n" data-dir="n" title="Resize"></div>
+      <div class="neo-resize-handle neo-rh-ne" data-dir="ne" title="Resize"></div>
+      <div class="neo-resize-handle neo-rh-e" data-dir="e" title="Resize"></div>
+      <div class="neo-resize-handle neo-rh-se" data-dir="se" title="Resize"></div>
+      <div class="neo-resize-handle neo-rh-s" data-dir="s" title="Resize"></div>
+      <div class="neo-resize-handle neo-rh-sw" data-dir="sw" title="Resize"></div>
+      <div class="neo-resize-handle neo-rh-w" data-dir="w" title="Resize"></div>
+    `;
+
+    const moveHandle = overlay.querySelector('.neo-move-handle') as HTMLElement;
+    if (moveHandle) {
+      moveHandle.addEventListener('mousedown', (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const style = doc.defaultView?.getComputedStyle(targetEl);
+
+        let startLeft = parseFloat(style?.left || `${left}`);
+        let startTop = parseFloat(style?.top || `${top}`);
+
+        if (style?.position !== 'absolute' && style?.position !== 'fixed') {
+          targetEl.style.position = 'absolute';
+          startLeft = left;
+          startTop = top;
+          targetEl.style.left = `${startLeft}px`;
+          targetEl.style.top = `${startTop}px`;
+        }
+
+        const onMouseMove = (me: MouseEvent) => {
+          me.preventDefault();
+          const dx = (me.clientX - startX) / this.currentScaleFactor;
+          const dy = (me.clientY - startY) / this.currentScaleFactor;
+
+          const newLeft = startLeft + dx;
+          const newTop = startTop + dy;
+
+          targetEl.style.left = `${newLeft}px`;
+          targetEl.style.top = `${newTop}px`;
+
+          overlay.style.left = `${left + dx}px`;
+          overlay.style.top = `${top + dy}px`;
+        };
+
+        const onMouseUp = () => {
+          doc.removeEventListener('mousemove', onMouseMove, true);
+          doc.removeEventListener('mouseup', onMouseUp, true);
+          this.renderSelectionOverlay(targetEl);
+        };
+
+        doc.addEventListener('mousemove', onMouseMove, true);
+        doc.addEventListener('mouseup', onMouseUp, true);
+      });
+    }
+
+    // Attach resize listeners
+    overlay.querySelectorAll('.neo-resize-handle').forEach(handle => {
+      handle.addEventListener('mousedown', (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const dir = (handle as HTMLElement).dataset.dir || 'se';
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startW = targetEl.offsetWidth;
+        const startH = targetEl.offsetHeight;
+        const style = doc.defaultView?.getComputedStyle(targetEl);
+        const startL = parseFloat(style?.left || `${left}`) || left;
+        const startT = parseFloat(style?.top || `${top}`) || top;
+
+        if (style?.position !== 'absolute' && style?.position !== 'fixed') {
+          targetEl.style.position = 'absolute';
+          targetEl.style.left = `${startL}px`;
+          targetEl.style.top = `${startT}px`;
+        }
+
+        const onResizeMove = (me: MouseEvent) => {
+          me.preventDefault();
+          const dx = (me.clientX - startX) / this.currentScaleFactor;
+          const dy = (me.clientY - startY) / this.currentScaleFactor;
+
+          let newW = startW;
+          let newH = startH;
+          let newL = startL;
+          let newT = startT;
+
+          if (dir.includes('e')) newW = Math.max(40, startW + dx);
+          if (dir.includes('s')) newH = Math.max(20, startH + dy);
+          if (dir.includes('w')) {
+            newW = Math.max(40, startW - dx);
+            newL = startL + (startW - newW);
+          }
+          if (dir.includes('n')) {
+            newH = Math.max(20, startH - dy);
+            newT = startT + (startH - newH);
+          }
+
+          targetEl.style.width = `${newW}px`;
+          targetEl.style.height = `${newH}px`;
+          targetEl.style.left = `${newL}px`;
+          targetEl.style.top = `${newT}px`;
+
+          overlay.style.width = `${newW}px`;
+          overlay.style.height = `${newH}px`;
+          overlay.style.left = `${newL}px`;
+          overlay.style.top = `${newT}px`;
+        };
+
+        const onResizeUp = () => {
+          doc.removeEventListener('mousemove', onResizeMove, true);
+          doc.removeEventListener('mouseup', onResizeUp, true);
+          this.renderSelectionOverlay(targetEl);
+        };
+
+        doc.addEventListener('mousemove', onResizeMove, true);
+        doc.addEventListener('mouseup', onResizeUp, true);
+      });
+    });
+  }
+
   private disableEditModeFeatures(): void {
     console.log(`[NeoEditor] disableEditModeFeatures called.`);
     const doc = this.slideFrameEl.contentDocument;
     if (!doc) return;
+
+    const overlay = doc.getElementById('neo-selection-overlay');
+    if (overlay) overlay.remove();
 
     if ((doc as any)._onEditClickCapture) {
       doc.removeEventListener('click', (doc as any)._onEditClickCapture, true);
@@ -1307,6 +1515,9 @@ class PresentationApp {
 
     const styleEl = clone.querySelector('#neo-editor-styles');
     if (styleEl) styleEl.remove();
+
+    const overlayEl = clone.querySelector('#neo-selection-overlay');
+    if (overlayEl) overlayEl.remove();
 
     // Reconstruct with original doctype if possible, otherwise use standard html5
     let doctypeString = '<!DOCTYPE html>\n';
