@@ -18,13 +18,22 @@ async function testSlideEditor() {
   if (!htmlContent.includes('id="btn-save-slide"')) {
     throw new Error('Missing btn-save-slide in index.html');
   }
+  if (!htmlContent.includes('id="btn-add-textbox"')) {
+    throw new Error('Missing btn-add-textbox in index.html');
+  }
+  if (!htmlContent.includes('id="select-font-size"')) {
+    throw new Error('Missing select-font-size in index.html');
+  }
+  if (!htmlContent.includes('id="input-font-color"')) {
+    throw new Error('Missing input-font-color in index.html');
+  }
   if (!htmlContent.includes('id="menu-toggle-edit"')) {
     throw new Error('Missing menu-toggle-edit in index.html');
   }
   if (!htmlContent.includes('id="menu-save-slide"')) {
     throw new Error('Missing menu-save-slide in index.html');
   }
-  console.log('✓ Verified WYSIWYG Slide Editor toolbar and menu controls in index.html');
+  console.log('✓ Verified WYSIWYG Slide Editor toolbar, formatting, and menu controls in index.html');
 
   // 2. Verify app.js contains edit mode enabling, disabling, and saving logic
   const jsPath = path.join(rootDir, 'dist/renderer/app.js');
@@ -32,6 +41,15 @@ async function testSlideEditor() {
 
   if (!jsContent.includes('toggleEditMode') || !jsContent.includes('enableEditModeFeatures') || !jsContent.includes('disableEditModeFeatures')) {
     throw new Error('Missing edit mode feature toggle methods in app.js');
+  }
+  if (!jsContent.includes('addNewTextBox')) {
+    throw new Error('Missing addNewTextBox method in app.js');
+  }
+  if (!jsContent.includes('setFontSize') || !jsContent.includes('adjustFontSize')) {
+    throw new Error('Missing font size adjustment methods in app.js');
+  }
+  if (!jsContent.includes('setFontColor')) {
+    throw new Error('Missing setFontColor method in app.js');
   }
   if (!jsContent.includes('editor-editable-text') || !jsContent.includes('contenteditable')) {
     throw new Error('Missing contenteditable text handling in app.js');

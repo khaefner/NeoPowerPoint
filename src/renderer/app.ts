@@ -38,6 +38,11 @@ class PresentationApp {
   private overviewGridEl = document.getElementById('overview-grid')!;
   private shortcutsModalEl = document.getElementById('shortcuts-modal')!;
   private overviewCountBadgeEl = document.getElementById('overview-count-badge');
+  private editorToolbarEl = document.getElementById('editor-toolbar')!;
+
+  // WYSIWYG Editor Selection State
+  private currentActiveElement: HTMLElement | null = null;
+  private currentSelectedRange: Range | null = null;
 
   // Slide Sorter State
   private draggedIndex: number | null = null;
@@ -64,6 +69,29 @@ class PresentationApp {
     document.getElementById('btn-windowed-mode')!.addEventListener('click', () => this.toggleWindowedPresentation());
     document.getElementById('btn-fullscreen-mode')!.addEventListener('click', () => this.toggleFullscreen());
     document.getElementById('btn-presenter-mode')!.addEventListener('click', () => window.electronAPI.openPresenterWindow());
+
+    // Editor Toolbar Controls
+    document.getElementById('btn-add-textbox')?.addEventListener('click', () => this.addNewTextBox());
+    document.getElementById('btn-font-smaller')?.addEventListener('click', () => this.adjustFontSize(-1));
+    document.getElementById('btn-font-larger')?.addEventListener('click', () => this.adjustFontSize(1));
+    document.getElementById('select-font-size')?.addEventListener('change', (e) => {
+      this.setFontSize((e.target as HTMLSelectElement).value);
+    });
+    document.getElementById('btn-format-bold')?.addEventListener('click', () => this.formatText('bold'));
+    document.getElementById('btn-format-italic')?.addEventListener('click', () => this.formatText('italic'));
+    document.getElementById('btn-format-underline')?.addEventListener('click', () => this.formatText('underline'));
+    document.getElementById('input-font-color')?.addEventListener('input', (e) => {
+      this.setFontColor((e.target as HTMLInputElement).value);
+    });
+    document.querySelectorAll('.color-swatch').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const color = (e.currentTarget as HTMLElement).dataset.color;
+        if (color) this.setFontColor(color);
+      });
+    });
+    document.getElementById('btn-delete-element')?.addEventListener('click', () => this.deleteSelectedElement());
+    document.getElementById('btn-editor-done')?.addEventListener('click', () => this.toggleEditMode());
+    document.getElementById('btn-editor-save')?.addEventListener('click', () => this.saveSlideHtml());
 
     // Dropdown menu
     const btnMenuMore = document.getElementById('btn-menu-more')!;
@@ -928,6 +956,7 @@ class PresentationApp {
     const btnSave = document.getElementById('btn-save-slide');
 
     if (this.isEditMode) {
+      this.editorToolbarEl?.classList.remove('hidden');
       btnToggle?.classList.add('active');
       if (btnToggle) {
         btnToggle.style.backgroundColor = 'var(--accent-primary)';
@@ -936,6 +965,7 @@ class PresentationApp {
       btnSave?.classList.remove('hidden');
       this.enableEditModeFeatures();
     } else {
+      this.editorToolbarEl?.classList.add('hidden');
       btnToggle?.classList.remove('active');
       if (btnToggle) {
         btnToggle.style.backgroundColor = '';
@@ -1016,7 +1046,7 @@ class PresentationApp {
           htmlEl.style.top = `${initialTop}px`;
         };
 
-        const onMouseUp = (upEvent: MouseEvent) => {
+        const onMouseUp = (_upEvent: MouseEvent) => {
           isDragging = false;
           htmlEl.classList.remove('editor-selected');
           doc.removeEventListener('mousemove', onMouseMove, true);
@@ -1041,6 +1071,30 @@ class PresentationApp {
     };
     (doc as any)._onEditClickCapture = onEditClickCapture;
     doc.addEventListener('click', onEditClickCapture, true);
+
+    // Track active selection and element for formatting toolbar
+    const onSelectionOrFocus = () => {
+      const sel = doc.defaultView?.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        this.currentSelectedRange = sel.getRangeAt(0).cloneRange();
+      }
+      const active = doc.activeElement as HTMLElement;
+      if (active && (active.isContentEditable || active.classList.contains('editor-editable-text') || active.classList.contains('editor-draggable'))) {
+        this.currentActiveElement = active;
+      }
+    };
+    (doc as any)._onSelectionOrFocus = onSelectionOrFocus;
+    doc.addEventListener('selectionchange', onSelectionOrFocus);
+    doc.addEventListener('mouseup', onSelectionOrFocus);
+    doc.addEventListener('keyup', onSelectionOrFocus);
+    doc.addEventListener('focusin', onSelectionOrFocus);
+    doc.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      const editable = target.closest('.editor-editable-text, .editor-draggable, .tb, p, h1, h2, h3, h4, h5, h6, span, div') as HTMLElement;
+      if (editable) {
+        this.currentActiveElement = editable;
+      }
+    });
 
     // Inject temporary styles for outlines
     let styleEl = doc.getElementById('neo-editor-styles');
@@ -1069,6 +1123,14 @@ class PresentationApp {
       delete (doc as any)._onEditClickCapture;
     }
 
+    if ((doc as any)._onSelectionOrFocus) {
+      doc.removeEventListener('selectionchange', (doc as any)._onSelectionOrFocus);
+      doc.removeEventListener('mouseup', (doc as any)._onSelectionOrFocus);
+      doc.removeEventListener('keyup', (doc as any)._onSelectionOrFocus);
+      doc.removeEventListener('focusin', (doc as any)._onSelectionOrFocus);
+      delete (doc as any)._onSelectionOrFocus;
+    }
+
     doc.querySelectorAll('.editor-editable-text').forEach(el => {
       (el as HTMLElement).removeAttribute('contenteditable');
       (el as HTMLElement).classList.remove('editor-editable-text');
@@ -1085,6 +1147,142 @@ class PresentationApp {
 
     const styleEl = doc.getElementById('neo-editor-styles');
     if (styleEl) styleEl.remove();
+  }
+
+  // --- WYSIWYG Editor Actions ---
+
+  addNewTextBox(): void {
+    if (!this.isEditMode) {
+      this.toggleEditMode();
+    }
+    const doc = this.slideFrameEl.contentDocument;
+    if (!doc) return;
+
+    const tb = doc.createElement('div');
+    tb.className = 'tb abs editor-editable-text editor-draggable';
+
+    // Staggered positioning
+    const left = 160 + (Math.floor(Math.random() * 6) * 40);
+    const top = 160 + (Math.floor(Math.random() * 6) * 40);
+
+    tb.style.position = 'absolute';
+    tb.style.left = `${left}px`;
+    tb.style.top = `${top}px`;
+    tb.style.fontSize = '2.5rem';
+    tb.style.fontWeight = '600';
+    tb.style.color = '#38bdf8';
+    tb.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+    tb.style.padding = '8px 16px';
+    tb.style.minWidth = '240px';
+    tb.style.minHeight = '48px';
+    tb.style.boxSizing = 'border-box';
+    tb.style.zIndex = '100';
+    tb.setAttribute('contenteditable', 'true');
+    tb.textContent = 'Click to edit text';
+
+    doc.body.appendChild(tb);
+    this.currentActiveElement = tb;
+
+    // Refresh editing capabilities for the newly added element
+    this.enableEditModeFeatures();
+
+    // Focus and select text in the new text box
+    tb.focus();
+    const range = doc.createRange();
+    range.selectNodeContents(tb);
+    const sel = doc.defaultView?.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+      this.currentSelectedRange = range.cloneRange();
+    }
+  }
+
+  setFontSize(size: string): void {
+    const doc = this.slideFrameEl.contentDocument;
+    if (!doc) return;
+
+    // If text inside iframe is actively selected, format or wrap selection
+    const sel = doc.defaultView?.getSelection();
+    if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const span = doc.createElement('span');
+      span.style.fontSize = size;
+      try {
+        span.appendChild(range.extractContents());
+        range.insertNode(span);
+        return;
+      } catch (_) {}
+    }
+
+    if (this.currentActiveElement) {
+      this.currentActiveElement.style.fontSize = size;
+    }
+  }
+
+  adjustFontSize(direction: number): void {
+    const doc = this.slideFrameEl.contentDocument;
+    if (!doc) return;
+
+    const targetEl = this.currentActiveElement || (doc.activeElement as HTMLElement);
+    if (!targetEl || targetEl === doc.body || targetEl === doc.documentElement) return;
+
+    const compStyle = doc.defaultView?.getComputedStyle(targetEl);
+    const currentPx = parseFloat(compStyle?.fontSize || '28') || 28;
+    const newPx = Math.max(10, Math.min(240, Math.round(currentPx + (direction * 4))));
+
+    targetEl.style.fontSize = `${newPx}px`;
+
+    const select = document.getElementById('select-font-size') as HTMLSelectElement;
+    if (select) {
+      select.value = `${newPx / 16}rem`;
+    }
+  }
+
+  setFontColor(color: string): void {
+    const doc = this.slideFrameEl.contentDocument;
+    if (!doc) return;
+
+    // If text is selected in slide
+    const sel = doc.defaultView?.getSelection();
+    if (sel && !sel.isCollapsed) {
+      doc.execCommand('styleWithCSS', false, 'true');
+      doc.execCommand('foreColor', false, color);
+    }
+
+    if (this.currentActiveElement) {
+      this.currentActiveElement.style.color = color;
+    }
+
+    const inputColor = document.getElementById('input-font-color') as HTMLInputElement;
+    if (inputColor && color.startsWith('#')) {
+      inputColor.value = color;
+    }
+  }
+
+  formatText(command: 'bold' | 'italic' | 'underline'): void {
+    const doc = this.slideFrameEl.contentDocument;
+    if (!doc) return;
+
+    if (this.currentSelectedRange) {
+      const sel = doc.defaultView?.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(this.currentSelectedRange);
+      }
+    }
+
+    doc.execCommand(command);
+  }
+
+  deleteSelectedElement(): void {
+    const doc = this.slideFrameEl.contentDocument;
+    if (!doc) return;
+
+    if (this.currentActiveElement && this.currentActiveElement !== doc.body && this.currentActiveElement !== doc.documentElement) {
+      this.currentActiveElement.remove();
+      this.currentActiveElement = null;
+    }
   }
 
   private async saveSlideHtml(): Promise<void> {
