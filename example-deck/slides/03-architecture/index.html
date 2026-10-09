@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Modular System Architecture</title>
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    .arch-container {
+      position: absolute;
+      top: 210px;
+      left: 100px;
+      right: 100px;
+      height: 780px;
+    }
+    .arch-box {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 20px;
+      padding: 24px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+    }
+    .arch-tier-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #38bdf8;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+    .arch-item-title {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 8px;
+    }
+    .arch-item-desc {
+      font-size: 1.1rem;
+      color: #94a3b8;
+      line-height: 1.45;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-top: 12px;
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+    }
+    .connector-line {
+      position: absolute;
+      background: rgba(255, 255, 255, 0.2);
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Slide Header -->
+  <div class="slide-header">
+    <div>
+      <div class="slide-category">System Design</div>
+      <h2>Secure, Isolated <span class="text-gradient">Multi-Process Model</span></h2>
+    </div>
+    <div class="badge">Drag Architecture Blocks</div>
+  </div>
+
+  <div class="arch-container">
+
+    <!-- Tier 1: Main Process -->
+    <div class="arch-box abs editor-draggable" style="position: absolute; left: 40px; top: 40px; width: 440px;">
+      <div class="arch-tier-title">Core Runtime</div>
+      <div class="arch-item-title">Electron Main Process</div>
+      <p class="arch-item-desc">
+        Coordinates native window management, multi-monitor presenter syncing, secure protocol serving (neopres://), and file watching.
+      </p>
+      <span class="status-badge">Node.js Environment</span>
+    </div>
+
+    <!-- Tier 2: IPC & Protocol Bridge -->
+    <div class="arch-box abs editor-draggable" style="position: absolute; left: 580px; top: 40px; width: 480px;">
+      <div class="arch-tier-title">Communication Layer</div>
+      <div class="arch-item-title">Type-Safe IPC & Preload</div>
+      <p class="arch-item-desc">
+        Context-isolated bridge exposing deck manifests, slide sorting, state synchronization, and WYSIWYG clean HTML persistence.
+      </p>
+      <span class="status-badge" style="background: rgba(129, 140, 248, 0.2); color: #a5b4fc;">Context Isolation</span>
+    </div>
+
+    <!-- Tier 3: Renderer Shell -->
+    <div class="arch-box abs editor-draggable" style="position: absolute; left: 1160px; top: 40px; width: 480px;">
+      <div class="arch-tier-title">Presentation Shell</div>
+      <div class="arch-item-title">Presenter & Window Host</div>
+      <p class="arch-item-desc">
+        Handles viewport dynamic scaling, keyboard shortcut hooks, thumbnail live caching, and slide sorter grid overlays.
+      </p>
+      <span class="status-badge" style="background: rgba(52, 211, 153, 0.2); color: #34d399;">60 FPS Canvas & DOM</span>
+    </div>
+
+    <!-- Tier 4: Isolated Slide Iframe -->
+    <div class="arch-box abs editor-draggable" style="position: absolute; left: 240px; top: 380px; width: 1200px; border-color: rgba(56, 189, 248, 0.4); background: rgba(14, 116, 144, 0.15);">
+      <div class="arch-tier-title" style="color: #67e8f9;">Isolated Slide Sandbox (Real Web Page)</div>
+      <div class="arch-item-title">1920 × 1080 Independent Chromium Execution Context</div>
+      <p class="arch-item-desc" style="font-size: 1.25rem;">
+        Each slide runs in complete isolation with full JavaScript APIs, CSS3 animations, Canvas/WebGL contexts, and DOM event dispatching. Faults in one slide never crash the presentation shell.
+      </p>
+      <div style="display: flex; gap: 16px; margin-top: 16px;">
+        <span class="status-badge">Three.js / WebGL</span>
+        <span class="status-badge">Chart.js / D3</span>
+        <span class="status-badge">Live WebSockets</span>
+        <span class="status-badge">Inline Contenteditable</span>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

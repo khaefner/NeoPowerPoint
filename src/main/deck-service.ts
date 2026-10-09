@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import AdmZip from 'adm-zip';
 import { app } from 'electron';
 import { DeckManifest, SlideMetadata } from '../types/deck';
@@ -77,6 +78,101 @@ export class DeckService {
     zip.addLocalFolder(folderPath);
     await zip.writeZipPromise(outputFilePath);
     return outputFilePath;
+  }
+
+  /**
+   * Imports and converts a PowerPoint (.pptx) file into a live NeoPowerPoint presentation deck.
+   */
+  async importPptx(pptxFilePath: string, outputDir?: string): Promise<{ deckPath: string; manifest: DeckManifest }> {
+    if (!fs.existsSync(pptxFilePath)) {
+      throw new Error(`PowerPoint file does not exist: ${pptxFilePath}`);
+    }
+
+    const sanitizedBase = path.basename(pptxFilePath, path.extname(pptxFilePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const targetDeckDir = outputDir || path.join(path.dirname(pptxFilePath), `${sanitizedBase}_NeoDeck`);
+    const extractTempDir = path.join(app.getPath('temp'), 'neopowerpoint', `pptx_extract_${sanitizedBase}_${Date.now()}`);
+
+    await fs.promises.mkdir(extractTempDir, { recursive: true });
+    await fs.promises.mkdir(targetDeckDir, { recursive: true });
+
+    // Locate Python converter scripts
+    const candidates = [
+      path.join(__dirname, '../converter'),
+      path.join(__dirname, '../../src/converter'),
+      path.join(app.getAppPath(), 'dist/converter'),
+      path.join(app.getAppPath(), 'src/converter'),
+      path.join(app.getAppPath(), '.agents/skills/pptx-to-neopowerpoint/scripts')
+    ];
+
+    let converterDir = '';
+    for (const cand of candidates) {
+      if (fs.existsSync(path.join(cand, 'extract_pptx.py')) && fs.existsSync(path.join(cand, 'generate_deck.py'))) {
+        converterDir = cand;
+        break;
+      }
+    }
+
+    if (!converterDir) {
+      throw new Error('PPTX converter scripts not found in application bundle');
+    }
+
+    const extractScript = path.join(converterDir, 'extract_pptx.py');
+    const generateScript = path.join(converterDir, 'generate_deck.py');
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+
+    // 1. Run extract_pptx.py
+    await this.runProcess(pythonCmd, [extractScript, pptxFilePath, '--out', extractTempDir]);
+
+    const extractJsonPath = path.join(extractTempDir, 'extract.json');
+    if (!fs.existsSync(extractJsonPath)) {
+      throw new Error(`Failed to extract presentation data: ${extractJsonPath} was not generated`);
+    }
+
+    // 2. Run generate_deck.py
+    await this.runProcess(pythonCmd, [generateScript, '--extract', extractJsonPath, '--out', targetDeckDir]);
+
+    // Clean up temporary extract folder
+    try {
+      await fs.promises.rm(extractTempDir, { recursive: true, force: true });
+    } catch (_) {}
+
+    // 3. Open the converted deck
+    return this.openFolder(targetDeckDir);
+  }
+
+  private runProcess(cmd: string, args: string[]): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout?.on('data', (d) => { stdout += d.toString(); });
+      proc.stderr?.on('data', (d) => { stderr += d.toString(); });
+
+      proc.on('error', (err) => {
+        reject(new Error(`Failed to execute ${cmd}: ${err.message}`));
+      });
+
+      proc.on('close', (code) => {
+        if (code === 0) {
+          resolve(stdout);
+        } else {
+          reject(new Error(`Process ${cmd} exited with code ${code}:\n${stderr || stdout}`));
+        }
+      });
+    });
+  }
+
+  /**
+   * Saves updated HTML content for a specific slide.
+   */
+  async saveSlideHtml(deckPath: string, slideRelPath: string, htmlContent: string): Promise<boolean> {
+    const fullPath = path.resolve(deckPath, slideRelPath);
+    if (!fullPath.startsWith(path.resolve(deckPath))) {
+      throw new Error('Directory traversal attempt detected');
+    }
+    await fs.promises.writeFile(fullPath, htmlContent, 'utf-8');
+    return true;
   }
 
   /**

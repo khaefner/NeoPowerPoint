@@ -12,7 +12,7 @@
       "id": "slide-1",
       "title": "Welcome to NeoPowerPoint",
       "path": "slides/01-welcome/index.html",
-      "notes": "Introduce the presentation. Mention that every slide is an isolated, 100% standard web page running real JavaScript, CSS animations, and Canvas/WebGL.",
+      "notes": "<ul><li>Introduce the presentation. Mention that every slide is an isolated, 100% standard web page running real JavaScript, CSS animations, and Canvas/WebGL.</li></ul><br><br>",
       "durationSec": 60,
       "transition": "fade"
     },

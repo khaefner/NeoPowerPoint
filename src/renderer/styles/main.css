@@ -186,6 +186,108 @@ body, html {
   text-decoration: underline;
 }
 
+/* WYSIWYG Formatting & Editor Toolbar */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 16px;
+  background-color: #0b1120;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 95;
+  flex-shrink: 0;
+  animation: slideDown 0.15s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.editor-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.editor-toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background-color: var(--border-color);
+  margin: 0 4px;
+}
+
+.editor-toolbar-spacer {
+  flex: 1;
+}
+
+.editor-tool-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 2px;
+}
+
+.editor-select {
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+}
+.editor-select:focus {
+  border-color: var(--accent-primary);
+}
+
+.color-picker-wrapper {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+}
+
+.color-input {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 44px;
+  height: 44px;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+}
+
+.color-swatches {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.color-swatch:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+  z-index: 2;
+}
+
 /* Workspace */
 .workspace {
   display: flex;
@@ -358,14 +460,42 @@ body, html {
   cursor: pointer;
 }
 
+/* Resizable Speaker Notes Panel */
+.notes-resizer {
+  height: 6px;
+  background: var(--border-color);
+  cursor: row-resize;
+  transition: background 0.15s ease, height 0.15s ease;
+  position: relative;
+  z-index: 10;
+  flex-shrink: 0;
+}
+.notes-resizer:hover, .notes-resizer.dragging {
+  background: var(--accent-primary);
+  height: 8px;
+}
+.notes-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 2px;
+  background: var(--text-muted);
+  border-radius: 2px;
+}
+
 .sidebar-notes-panel {
-  padding: 12px;
-  border-top: 1px solid var(--border-color);
+  padding: 8px 10px 10px;
   background-color: var(--bg-surface);
   display: flex;
   flex-direction: column;
   gap: 6px;
-  height: 170px;
+  height: var(--notes-panel-height, 220px);
+  min-height: 110px;
+  max-height: 75vh;
+  flex-shrink: 0;
 }
 
 .notes-panel-header {
@@ -373,27 +503,190 @@ body, html {
   justify-content: space-between;
   align-items: center;
 }
-.notes-panel-header h4 {
-  font-size: 0.8rem;
+.notes-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.notes-header-left h4 {
+  font-size: 0.78rem;
   color: var(--text-muted);
   text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.notes-save-status {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #34d399;
+  opacity: 0.85;
+  transition: opacity 0.2s;
+}
+.notes-save-status.saving {
+  color: #fbbf24;
+}
+.notes-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-#slide-notes-editor {
-  flex: 1;
-  resize: none;
+/* Notes Formatting Toolbar */
+.notes-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 5px;
   background-color: var(--bg-surface-elevated);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.notes-toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-color);
+  margin: 0 3px;
+}
+.btn-micro {
+  padding: 2px 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s ease;
+}
+.btn-micro:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+  border-color: var(--border-color);
+}
+.btn-micro.active {
+  background: #0284c7;
+  color: #fff;
+}
+
+.slide-notes-editor {
+  flex: 1;
+  overflow-y: auto;
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
   color: var(--text-main);
   font-family: inherit;
-  font-size: 0.82rem;
+  font-size: 0.86rem;
+  line-height: 1.5;
   outline: none;
   user-select: text;
 }
-#slide-notes-editor:focus {
+.slide-notes-editor:focus {
   border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+.slide-notes-editor:empty:before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  font-style: italic;
+  pointer-events: none;
+}
+.slide-notes-editor ul, .slide-notes-editor ol,
+.modal-notes-editor ul, .modal-notes-editor ol {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+.slide-notes-editor li, .modal-notes-editor li {
+  margin: 2px 0;
+}
+.slide-notes-editor p, .modal-notes-editor p {
+  margin: 4px 0;
+}
+.slide-notes-editor h1, .slide-notes-editor h2, .slide-notes-editor h3,
+.modal-notes-editor h1, .modal-notes-editor h2, .modal-notes-editor h3 {
+  color: #38bdf8;
+  margin: 6px 0 2px;
+}
+
+/* Expanded Speaker Notes Modal Window */
+.notes-modal-container {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  width: 900px;
+  max-width: 92vw;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.notes-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-surface-elevated);
+}
+.notes-modal-title h3 {
+  font-size: 1.15rem;
+  color: var(--text-main);
+  margin-bottom: 2px;
+}
+.notes-modal-subtitle {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.notes-modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.notes-modal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #0b1120;
+  border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+.notes-modal-body {
+  flex: 1;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal-notes-editor {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  color: var(--text-main);
+  font-size: 1.05rem;
+  line-height: 1.7;
+  outline: none;
+}
+.modal-notes-editor:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+.modal-notes-editor:empty:before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  font-style: italic;
+  pointer-events: none;
 }
 
 /* Stage & Presentation Scaler */
@@ -468,11 +761,27 @@ body, html {
 }
 
 .slide-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
   border: none;
   display: block;
   background: #ffffff;
+  will-change: opacity, transform;
+}
+
+.slide-frame.slide-frame-active {
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.slide-frame.slide-frame-idle {
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* Presentation Modes: Windowed & Fullscreen */

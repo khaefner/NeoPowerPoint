@@ -1,13 +1,15 @@
-interface PresenterWindow {
-  presenterAPI: {
-    onSyncState: (callback: (state: any) => void) => () => void;
-    navigateSlide: (index: number) => void;
-    nextSlide: () => void;
-    prevSlide: () => void;
-  };
+declare global {
+  interface Window {
+    presenterAPI: {
+      onSyncState: (callback: (state: any) => void) => () => void;
+      navigateSlide: (index: number) => void;
+      nextSlide: () => void;
+      prevSlide: () => void;
+    };
+  }
 }
 
-declare const window: Window & PresenterWindow;
+export {};
 
 let currentState: any = null;
 let timerSeconds = 0;
@@ -153,7 +155,10 @@ function renderState(state: any) {
     }
     // Speaker Notes
     if (currentSlide.notes && currentSlide.notes.trim()) {
-      notesContentEl.innerHTML = currentSlide.notes.replace(/\n/g, '<br/>');
+      const notes = currentSlide.notes.trim();
+      notesContentEl.innerHTML = (notes.startsWith('<') || notes.includes('</'))
+        ? notes
+        : notes.replace(/\n/g, '<br/>');
     } else {
       notesContentEl.innerHTML = '<p class="notes-placeholder">No speaker notes for this slide.</p>';
     }

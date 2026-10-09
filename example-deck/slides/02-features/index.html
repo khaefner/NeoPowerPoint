@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Core Platform Capabilities</title>
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    .features-grid {
+      position: absolute;
+      top: 240px;
+      left: 100px;
+      right: 100px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 36px;
+    }
+    .feature-card {
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 24px;
+      padding: 40px 32px;
+      display: flex;
+      flex-direction: column;
+      height: 580px;
+      position: relative;
+      transition: all 0.3s ease;
+    }
+    .feature-card:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: #38bdf8;
+      transform: translateY(-6px);
+      box-shadow: 0 16px 40px rgba(56, 189, 248, 0.12);
+    }
+    .icon-wrapper {
+      width: 76px;
+      height: 76px;
+      border-radius: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      margin-bottom: 28px;
+    }
+    .feature-title {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 16px;
+    }
+    .feature-desc {
+      font-size: 1.25rem;
+      color: #94a3b8;
+      line-height: 1.6;
+      margin-bottom: 24px;
+      flex-grow: 1;
+    }
+    .feature-list {
+      list-style: none;
+      margin-bottom: 24px;
+    }
+    .feature-list li {
+      font-size: 1.15rem;
+      color: #cbd5e1;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .feature-list li::before {
+      content: "✓";
+      color: #34d399;
+      font-weight: 800;
+    }
+    .interactive-btn {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      color: #38bdf8;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.2s ease;
+    }
+    .interactive-btn:hover {
+      background: #38bdf8;
+      color: #0b0f19;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Slide Header -->
+  <div class="slide-header">
+    <div>
+      <div class="slide-category">Platform Capabilities</div>
+      <h2>Engineered for <span class="text-gradient">Power & Interactivity</span></h2>
+    </div>
+    <div class="badge">Clickable & Editable</div>
+  </div>
+
+  <!-- Draggable decorative sticker -->
+  <div class="abs editor-draggable" style="position: absolute; left: 1650px; top: 120px; width: 170px; background: rgba(52, 211, 153, 0.15); border: 1px solid #34d399; padding: 8px 16px; border-radius: 12px; text-align: center; color: #34d399; font-weight: 700; font-size: 0.95rem;">
+    💡 Drag me anywhere
+  </div>
+
+  <!-- 3 Features Grid -->
+  <div class="features-grid">
+    
+    <!-- Card 1 -->
+    <div class="feature-card">
+      <div class="icon-wrapper">
+        <img src="../../assets/media/icon-code.svg" alt="Code" style="width: 44px; height: 44px;">
+      </div>
+      <h3 class="feature-title">Native Web Engine</h3>
+      <p class="feature-desc">
+        Runs Chromium directly inside Electron. Embed full D3 charts, Three.js 3D scenes, Canvas graphs, and video streams.
+      </p>
+      <ul class="feature-list">
+        <li>100% Standard DOM & CSS</li>
+        <li>Unlimited external libraries</li>
+        <li>Async data loading</li>
+      </ul>
+      <button class="interactive-btn" id="btn-demo-1">
+        <span>Test Interaction</span>
+        <span id="counter-1">Count: 0</span>
+      </button>
+    </div>
+
+    <!-- Card 2 -->
+    <div class="feature-card">
+      <div class="icon-wrapper">
+        <img src="../../assets/media/icon-chart.svg" alt="Chart" style="width: 44px; height: 44px;">
+      </div>
+      <h3 class="feature-title">WYSIWYG Editing</h3>
+      <p class="feature-desc">
+        Click any text element to edit titles, paragraphs, or list items. Drag and position cards and badges smoothly.
+      </p>
+      <ul class="feature-list">
+        <li>Direct contenteditable text</li>
+        <li>Coordinate-scaled dragging</li>
+        <li>Safe HTML persistence</li>
+      </ul>
+      <button class="interactive-btn" id="btn-demo-2">
+        <span>Test Interaction</span>
+        <span id="counter-2">Count: 0</span>
+      </button>
+    </div>
+
+    <!-- Card 3 -->
+    <div class="feature-card">
+      <div class="icon-wrapper">
+        <img src="../../assets/media/icon-rocket.svg" alt="Rocket" style="width: 44px; height: 44px;">
+      </div>
+      <h3 class="feature-title">Dual Presentation</h3>
+      <p class="feature-desc">
+        Save presentations as transparent directory structures or bundle them into portable standalone zip packages.
+      </p>
+      <ul class="feature-list">
+        <li>Git friendly format</li>
+        <li>Zero conversion artifacts</li>
+        <li>Hot reload on file save</li>
+      </ul>
+      <button class="interactive-btn" id="btn-demo-3">
+        <span>Test Interaction</span>
+        <span id="counter-3">Count: 0</span>
+      </button>
+    </div>
+
+  </div>
+
+  <script>
+    ['1', '2', '3'].forEach(id => {
+      let count = 0;
+      const btn = document.getElementById('btn-demo-' + id);
+      const cnt = document.getElementById('counter-' + id);
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        count++;
+        cnt.textContent = 'Count: ' + count;
+      });
+    });
+  </script>
+
+</body>
+</html>

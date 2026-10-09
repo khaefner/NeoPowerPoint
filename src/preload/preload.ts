@@ -4,10 +4,12 @@ import { DeckManifest } from '../types/deck';
 export interface ElectronAPI {
   openFolderDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
   openPackageDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
+  importPptxDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
   exportPackageDialog: () => Promise<string | null>;
   createNewDeckDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
   loadSampleDeck: () => Promise<{ deckPath: string; manifest: DeckManifest }>;
   saveManifest: (manifest: DeckManifest) => Promise<boolean>;
+  saveSlideHtml: (slideRelPath: string, htmlContent: string) => Promise<boolean>;
   getManifest: () => Promise<DeckManifest | null>;
   addNewSlide: (title: string) => Promise<DeckManifest | null>;
   toggleFullscreen: () => Promise<boolean>;
@@ -17,19 +19,23 @@ export interface ElectronAPI {
   syncStateToPresenter: (state: any) => void;
   onFileChanged: (callback: (data: { filePath: string; eventType: string }) => void) => () => void;
   onNavigateSlide: (callback: (index: number) => void) => () => void;
+  onDeckLoadedEvent: (callback: (data: { deckPath: string; manifest: DeckManifest }) => void) => () => void;
   onToggleFullscreenEvent: (callback: () => void) => () => void;
   onToggleWindowedEvent: (callback: () => void) => () => void;
   onOpenPresenterEvent: (callback: () => void) => () => void;
   onReloadSlideEvent: (callback: () => void) => () => void;
+  onSetPresentationModeEvent: (callback: (enabled: boolean) => void) => () => void;
 }
 
 const api: ElectronAPI = {
   openFolderDialog: () => ipcRenderer.invoke('dialog:open-folder'),
   openPackageDialog: () => ipcRenderer.invoke('dialog:open-package'),
+  importPptxDialog: () => ipcRenderer.invoke('dialog:import-pptx'),
   exportPackageDialog: () => ipcRenderer.invoke('dialog:export-package'),
   createNewDeckDialog: () => ipcRenderer.invoke('dialog:create-deck'),
   loadSampleDeck: () => ipcRenderer.invoke('deck:load-sample'),
   saveManifest: (manifest) => ipcRenderer.invoke('deck:save-manifest', manifest),
+  saveSlideHtml: (slideRelPath, htmlContent) => ipcRenderer.invoke('deck:save-slide-html', slideRelPath, htmlContent),
   getManifest: () => ipcRenderer.invoke('deck:get-manifest'),
   addNewSlide: (title) => ipcRenderer.invoke('deck:add-slide', title),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen'),
@@ -48,6 +54,12 @@ const api: ElectronAPI = {
     const handler = (_: any, index: number) => callback(index);
     ipcRenderer.on('slide:navigate', handler);
     return () => ipcRenderer.removeListener('slide:navigate', handler);
+  },
+
+  onDeckLoadedEvent: (callback) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('deck:loaded', handler);
+    return () => ipcRenderer.removeListener('deck:loaded', handler);
   },
 
   onToggleFullscreenEvent: (callback) => {
@@ -72,6 +84,12 @@ const api: ElectronAPI = {
     const handler = () => callback();
     ipcRenderer.on('menu:reload-slide', handler);
     return () => ipcRenderer.removeListener('menu:reload-slide', handler);
+  },
+
+  onSetPresentationModeEvent: (callback) => {
+    const handler = (_: any, enabled: boolean) => callback(enabled);
+    ipcRenderer.on('deck:set-presentation-mode', handler);
+    return () => ipcRenderer.removeListener('deck:set-presentation-mode', handler);
   }
 };
 

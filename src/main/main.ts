@@ -35,10 +35,15 @@ function createMainWindow(): void {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      webSecurity: false,
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  mainWindow.webContents.on('console-message', (_event, _level, message) => {
+    console.log(`[RENDERER CONSOLE]: ${message}`);
+  });
+
+  mainWindow.loadURL('neopres://deck/renderer/index.html');
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -57,16 +62,30 @@ function openPresenterWindow(): boolean {
     return true;
   }
 
-  // Find a secondary display if available
+  // Find displays
   const displays = screen.getAllDisplays();
   const primaryDisplay = screen.getPrimaryDisplay();
-  const secondaryDisplay = displays.find(d => d.id !== primaryDisplay.id) || primaryDisplay;
+  const secondaryDisplay = displays.find(d => d.id !== primaryDisplay.id);
 
+  // Automatically put audience presentation window into Fullscreen
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (secondaryDisplay) {
+      // If external projector/secondary monitor is attached, place audience window there
+      mainWindow.setBounds(secondaryDisplay.bounds);
+      mainWindow.setFullScreen(true);
+    } else {
+      // On single monitor, audience window goes fullscreen presentation
+      mainWindow.setFullScreen(true);
+    }
+    mainWindow.webContents.send('deck:set-presentation-mode', true);
+  }
+
+  // Open Presenter View on the primary presenter monitor
   presenterWindow = new BrowserWindow({
-    x: secondaryDisplay.bounds.x + 50,
-    y: secondaryDisplay.bounds.y + 50,
-    width: 1024,
-    height: 700,
+    x: primaryDisplay.bounds.x + 40,
+    y: primaryDisplay.bounds.y + 40,
+    width: Math.min(1150, primaryDisplay.bounds.width - 80),
+    height: Math.min(780, primaryDisplay.bounds.height - 80),
     minWidth: 700,
     minHeight: 500,
     title: 'NeoPowerPoint — Presenter View',
@@ -76,10 +95,15 @@ function openPresenterWindow(): boolean {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      webSecurity: false,
     }
   });
 
-  presenterWindow.loadFile(path.join(__dirname, '../presenter/index.html'));
+  presenterWindow.webContents.on('console-message', (_event, _level, message) => {
+    console.log(`[PRESENTER CONSOLE]: ${message}`);
+  });
+
+  presenterWindow.loadURL('neopres://deck/presenter/index.html');
 
   presenterWindow.webContents.on('did-finish-load', () => {
     if (latestPresenterState && presenterWindow && !presenterWindow.isDestroyed()) {
@@ -89,6 +113,12 @@ function openPresenterWindow(): boolean {
 
   presenterWindow.on('closed', () => {
     presenterWindow = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isFullScreen()) {
+        mainWindow.setFullScreen(false);
+      }
+      mainWindow.webContents.send('deck:set-presentation-mode', false);
+    }
   });
 
   return true;
@@ -118,6 +148,16 @@ function buildAppMenu(): void {
           click: async () => {
             if (mainWindow) {
               const res = await handleOpenPackage();
+              if (res) mainWindow.webContents.send('deck:loaded', res);
+            }
+          }
+        },
+        {
+          label: 'Import PowerPoint (.pptx)...',
+          accelerator: 'CmdOrCtrl+I',
+          click: async () => {
+            if (mainWindow) {
+              const res = await handleImportPptx();
               if (res) mainWindow.webContents.send('deck:loaded', res);
             }
           }
@@ -312,9 +352,31 @@ async function handleCreateDeck() {
   return deckData;
 }
 
+async function handleImportPptx() {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select PowerPoint Presentation (.pptx)',
+    filters: [
+      { name: 'PowerPoint Presentation (*.pptx, *.ppt)', extensions: ['pptx', 'ppt'] },
+      { name: 'All Files', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const pptxPath = result.filePaths[0];
+  const deckData = await deckService.importPptx(pptxPath);
+  deckWatcher.watch(deckData.deckPath);
+  return deckData;
+}
+
 // IPC Handlers
 ipcMain.handle('dialog:open-folder', async () => handleOpenFolder());
 ipcMain.handle('dialog:open-package', async () => handleOpenPackage());
+ipcMain.handle('dialog:import-pptx', async () => handleImportPptx());
 ipcMain.handle('dialog:export-package', async () => handleExportPackage());
 ipcMain.handle('dialog:create-deck', async () => handleCreateDeck());
 
@@ -337,6 +399,12 @@ ipcMain.handle('deck:save-manifest', async (_, manifest: DeckManifest) => {
   if (!activePath) return false;
   await deckService.saveManifest(activePath, manifest);
   return true;
+});
+
+ipcMain.handle('deck:save-slide-html', async (_, slideRelPath: string, htmlContent: string) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return false;
+  return deckService.saveSlideHtml(activePath, slideRelPath, htmlContent);
 });
 
 ipcMain.handle('deck:get-manifest', async () => {

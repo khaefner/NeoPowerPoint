@@ -35,6 +35,16 @@
       </div>
 
       <div class="toolbar-right">
+        <button id="btn-save-slide" class="btn btn-primary" title="Save Slide Changes (Ctrl+S)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Slide
+        </button>
+
+        <button id="btn-toggle-edit-mode" class="btn btn-secondary" title="Toggle Interactive Script Test Mode (Ctrl+E)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span id="label-toggle-edit">Test Scripts</span>
+        </button>
+
         <button id="btn-overview-grid" class="btn btn-secondary" title="Slide Sorter (O)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
           Slide Sorter
@@ -62,10 +72,19 @@
           <div id="dropdown-menu" class="dropdown-content hidden">
             <button id="menu-open-folder">📂 Open Folder...</button>
             <button id="menu-open-package">📦 Open .neopres Package...</button>
+            <button id="menu-import-pptx">📊 Import PowerPoint (.pptx)...</button>
             <button id="menu-export-package">💾 Export as .neopres...</button>
             <div class="dropdown-divider"></div>
             <button id="menu-new-deck">✨ New Presentation...</button>
             <button id="menu-new-slide">➕ Add New Slide...</button>
+            <button id="menu-toggle-edit">✏️ Edit Slide (Ctrl+E)</button>
+            <button id="menu-save-slide">💾 Save Slide (Ctrl+S)</button>
+            <div class="dropdown-divider"></div>
+            <div style="padding: 4px 12px 2px; font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Transition Effect</div>
+            <button id="menu-trans-fade">✨ Dissolve / Fade (Default)</button>
+            <button id="menu-trans-slide">➡️ Slide Push</button>
+            <button id="menu-trans-zoom">🔍 Zoom</button>
+            <button id="menu-trans-none">⚡ Cut (Instant)</button>
             <div class="dropdown-divider"></div>
             <button id="menu-reload-slide">🔄 Reload Slide (R)</button>
             <button id="menu-help-shortcuts">⌨️ Keyboard Shortcuts (?)</button>
@@ -73,6 +92,80 @@
         </div>
       </div>
     </header>
+
+    <!-- Dedicated Slide Formatting & Editor Toolbar (Visible during Edit Mode) -->
+    <div id="editor-toolbar" class="editor-toolbar hidden">
+      <div class="editor-toolbar-group">
+        <button id="btn-add-textbox" class="btn btn-sm btn-primary" title="Insert New Text Box (T)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M9 20h6"/></svg>
+          + Text Box
+        </button>
+      </div>
+
+      <div class="editor-toolbar-divider"></div>
+
+      <!-- Font Size Controls -->
+      <div class="editor-toolbar-group">
+        <span class="editor-tool-label">Size:</span>
+        <button id="btn-font-smaller" class="btn-icon btn-sm" title="Decrease Font Size">A−</button>
+        <select id="select-font-size" class="editor-select" title="Font Size">
+          <option value="1rem">16px (Small)</option>
+          <option value="1.25rem">20px (Body)</option>
+          <option value="1.5rem">24px (Lead)</option>
+          <option value="2rem">32px (Subtitle)</option>
+          <option value="2.5rem" selected>40px (Heading 3)</option>
+          <option value="3.5rem">56px (Heading 2)</option>
+          <option value="5rem">80px (Hero Title)</option>
+        </select>
+        <button id="btn-font-larger" class="btn-icon btn-sm" title="Increase Font Size">A+</button>
+      </div>
+
+      <div class="editor-toolbar-divider"></div>
+
+      <!-- Font Style Controls -->
+      <div class="editor-toolbar-group">
+        <button id="btn-format-bold" class="btn-icon btn-sm" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button id="btn-format-italic" class="btn-icon btn-sm" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button id="btn-format-underline" class="btn-icon btn-sm" title="Underline (Ctrl+U)"><u>U</u></button>
+      </div>
+
+      <div class="editor-toolbar-divider"></div>
+
+      <!-- Font Color Controls -->
+      <div class="editor-toolbar-group">
+        <span class="editor-tool-label">Color:</span>
+        <div class="color-picker-wrapper" title="Choose Custom Font Color">
+          <input type="color" id="input-font-color" value="#38bdf8" class="color-input">
+        </div>
+        <div class="color-swatches">
+          <button class="color-swatch" data-color="#ffffff" style="background:#ffffff;" title="White"></button>
+          <button class="color-swatch" data-color="#38bdf8" style="background:#38bdf8;" title="Sky Blue"></button>
+          <button class="color-swatch" data-color="#818cf8" style="background:#818cf8;" title="Indigo"></button>
+          <button class="color-swatch" data-color="#34d399" style="background:#34d399;" title="Emerald"></button>
+          <button class="color-swatch" data-color="#fbbf24" style="background:#fbbf24;" title="Amber"></button>
+          <button class="color-swatch" data-color="#f43f5e" style="background:#f43f5e;" title="Rose"></button>
+          <button class="color-swatch" data-color="#94a3b8" style="background:#94a3b8;" title="Muted Slate"></button>
+          <button class="color-swatch" data-color="#0f172a" style="background:#0f172a; border: 1px solid #475569;" title="Dark"></button>
+        </div>
+      </div>
+
+      <div class="editor-toolbar-divider"></div>
+
+      <!-- Delete Selected Box -->
+      <div class="editor-toolbar-group">
+        <button id="btn-delete-element" class="btn-icon btn-sm" title="Delete Selected Text Box">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        </button>
+      </div>
+
+      <div class="editor-toolbar-spacer"></div>
+
+      <!-- Save and Script Test Actions inside editor bar -->
+      <div class="editor-toolbar-group">
+        <button id="btn-editor-done" class="btn btn-sm btn-secondary" title="Test Interactive Slide Scripts (Ctrl+E)">Test Scripts</button>
+        <button id="btn-editor-save" class="btn btn-sm btn-primary" title="Save Changes (Ctrl+S)">💾 Save Slide</button>
+      </div>
+    </div>
 
     <!-- Main Workspace -->
     <main class="workspace">
@@ -85,13 +178,34 @@
         <div id="slides-list" class="slides-list">
           <!-- Slide items generated dynamically -->
         </div>
-        <!-- Notes Preview / Editor Panel at bottom of sidebar -->
-        <div class="sidebar-notes-panel">
+        <!-- Resizable Speaker Notes Panel with Rich Text Formatting -->
+        <div id="notes-resizer" class="notes-resizer" title="Drag to resize speaker notes panel"></div>
+        <div id="sidebar-notes-panel" class="sidebar-notes-panel">
           <div class="notes-panel-header">
-            <h4>Speaker Notes</h4>
-            <button id="btn-save-notes" class="btn-text">Save</button>
+            <div class="notes-header-left">
+              <h4>Speaker Notes</h4>
+              <span id="notes-save-status" class="notes-save-status">Saved</span>
+            </div>
+            <div class="notes-header-actions">
+              <button id="btn-expand-notes" class="btn-icon btn-micro" title="Expand Notes to Large Window">⤢</button>
+              <button id="btn-save-notes" class="btn-text">Save</button>
+            </div>
           </div>
-          <textarea id="slide-notes-editor" placeholder="Add presenter speaker notes for this slide..."></textarea>
+
+          <!-- Notes Formatting Toolbar -->
+          <div class="notes-toolbar">
+            <button id="btn-notes-bold" class="btn-micro" title="Bold (Ctrl+B)"><b>B</b></button>
+            <button id="btn-notes-italic" class="btn-micro" title="Italic (Ctrl+I)"><i>I</i></button>
+            <button id="btn-notes-underline" class="btn-micro" title="Underline (Ctrl+U)"><u>U</u></button>
+            <div class="notes-toolbar-divider"></div>
+            <button id="btn-notes-bullet" class="btn-micro" title="Bulleted List">•≡</button>
+            <button id="btn-notes-number" class="btn-micro" title="Numbered List">1.≡</button>
+            <div class="notes-toolbar-divider"></div>
+            <button id="btn-notes-font-down" class="btn-micro" title="Decrease Font Size">A−</button>
+            <button id="btn-notes-font-up" class="btn-micro" title="Increase Font Size">A+</button>
+          </div>
+
+          <div id="slide-notes-editor" class="slide-notes-editor" contenteditable="true" data-placeholder="Type speaker notes here... Use formatting bar for bullets, bold, lists."></div>
         </div>
       </aside>
 
@@ -107,6 +221,7 @@
               <button id="btn-welcome-sample" class="btn btn-primary btn-lg">🚀 Load Interactive Demo</button>
               <button id="btn-welcome-open-folder" class="btn btn-secondary btn-lg">📂 Open Presentation Folder</button>
               <button id="btn-welcome-open-package" class="btn btn-secondary btn-lg">📦 Open .neopres Package</button>
+              <button id="btn-welcome-import-pptx" class="btn btn-secondary btn-lg">📊 Import PowerPoint (.pptx)</button>
               <button id="btn-welcome-new" class="btn btn-secondary btn-lg">✨ Create New Presentation</button>
             </div>
           </div>
@@ -115,7 +230,8 @@
         <!-- Presentation Slide Container (Aspect Ratio Scaled) -->
         <div id="slide-wrapper" class="slide-wrapper hidden">
           <div id="slide-box" class="slide-box">
-            <iframe id="slide-frame" class="slide-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
+            <iframe id="slide-frame-a" class="slide-frame slide-frame-active"></iframe>
+            <iframe id="slide-frame-b" class="slide-frame slide-frame-idle"></iframe>
           </div>
         </div>
 
@@ -156,6 +272,38 @@
       </div>
     </div>
 
+    <!-- Expanded Speaker Notes Modal Window -->
+    <div id="notes-modal" class="modal-overlay hidden">
+      <div class="notes-modal-container">
+        <div class="notes-modal-header">
+          <div class="notes-modal-title">
+            <h3>Speaker Notes &amp; Script Editor</h3>
+            <span id="notes-modal-slide-title" class="notes-modal-subtitle">Slide 1</span>
+          </div>
+          <div class="notes-modal-header-actions">
+            <button id="btn-notes-modal-save" class="btn btn-primary btn-sm">💾 Save Notes</button>
+            <button id="btn-close-notes-modal" class="btn-icon" title="Close Window (Esc)">✕</button>
+          </div>
+        </div>
+
+        <div class="notes-modal-toolbar">
+          <button id="btn-m-notes-bold" class="btn-icon btn-sm" title="Bold (Ctrl+B)"><b>B</b></button>
+          <button id="btn-m-notes-italic" class="btn-icon btn-sm" title="Italic (Ctrl+I)"><i>I</i></button>
+          <button id="btn-m-notes-underline" class="btn-icon btn-sm" title="Underline (Ctrl+U)"><u>U</u></button>
+          <div class="editor-toolbar-divider"></div>
+          <button id="btn-m-notes-bullet" class="btn btn-secondary btn-sm" title="Bullet List">• Bullet List</button>
+          <button id="btn-m-notes-number" class="btn btn-secondary btn-sm" title="Numbered List">1. Numbered List</button>
+          <div class="editor-toolbar-divider"></div>
+          <button id="btn-m-notes-font-down" class="btn-icon btn-sm" title="Decrease Font Size">A−</button>
+          <button id="btn-m-notes-font-up" class="btn-icon btn-sm" title="Increase Font Size">A+</button>
+        </div>
+
+        <div class="notes-modal-body">
+          <div id="modal-notes-editor" class="modal-notes-editor" contenteditable="true" data-placeholder="Type or format your speaker script and presentation notes here..."></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Keyboard Shortcuts Modal -->
     <div id="shortcuts-modal" class="modal-overlay hidden">
       <div class="modal-card">
@@ -167,6 +315,9 @@
           <div class="shortcut-item"><kbd>→</kbd> / <kbd>Space</kbd> / <kbd>PageDown</kbd><span>Next Slide</span></div>
           <div class="shortcut-item"><kbd>←</kbd> / <kbd>Backspace</kbd> / <kbd>PageUp</kbd><span>Previous Slide</span></div>
           <div class="shortcut-item"><kbd>Home</kbd> / <kbd>End</kbd><span>First / Last Slide</span></div>
+          <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>E</kbd><span>Toggle Slide WYSIWYG Edit Mode</span></div>
+          <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>S</kbd><span>Save Slide Changes (in Edit Mode)</span></div>
+          <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>B</kbd> / <kbd>I</kbd><span>Bold / Italic (while editing text)</span></div>
           <div class="shortcut-item"><kbd>W</kbd><span>Toggle Windowed Presentation Mode (fills window)</span></div>
           <div class="shortcut-item"><kbd>F11</kbd> / <kbd>F</kbd><span>Toggle Fullscreen Mode</span></div>
           <div class="shortcut-item"><kbd>P</kbd><span>Open Presenter View (notes + timer)</span></div>

@@ -2,5 +2,6 @@ node_modules/
 dist/
 release/
 test-output/
+*_NeoDeck/
 *.log
 .DS_Store
