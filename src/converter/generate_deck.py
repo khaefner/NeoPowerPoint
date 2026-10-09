@@ -370,11 +370,13 @@ def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
         else:
             return f'<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}><path d="M {w},0 C {w*0.3},0 {w*0.3},{h*0.4} 0,{h*0.5} C {w*0.3},{h*0.6} {w*0.3},{h} {w},{h}" fill="none" stroke="{line_col}" stroke-width="{lw:.1f}"/></svg>'
 
-    # Handle Lines and Arrows
-    if kind == 'line' or geom == 'line' or (line and w <= 1.0 and h > 1.0) or (line and h <= 1.0 and w > 1.0):
+    # Handle Lines and Connectors
+    if kind == 'line' or geom in ('line', 'straightConnector1', 'bentConnector2', 'bentConnector3', 'curvedConnector2', 'curvedConnector3') or (line and w <= 3.0 and h > 3.0) or (line and h <= 3.0 and w > 3.0):
         line_col = line.get('color', '#ffffff') if line else '#ffffff'
         lw = max(1.0, line.get('width_px', 1.0)) if line else 1.0
-        is_arrow = 'Arrow' in sh.get('name', '')
+        head = line.get('head') if line else None
+        tail = line.get('tail') if line else None
+        is_arrow = ('Arrow' in sh.get('name', '')) or bool(head) or bool(tail)
 
         anim_classes = ''
         anim_attrs = f' data-spid="{spid}"' if spid else ''
@@ -385,49 +387,58 @@ def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
             anim_classes = f' neo-anim-target neo-anim-step-{st_num} neo-anim-{eff_name} anim-hidden'
             anim_attrs += f' data-anim-step="{st_num}" data-anim-type="{eff_type}" data-anim-effect="{eff_name}"'
 
-        if w <= 1.0: # Vertical line
-            if is_arrow:
-                arrow_sz = max(6.0, lw * 3.5)
-                return f'''<svg class="abs{anim_classes}" style="left:{(x - arrow_sz/2):.1f}px;top:{y:.1f}px;width:{arrow_sz:.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}>
-  <line x1="{arrow_sz/2:.1f}" y1="0" x2="{arrow_sz/2:.1f}" y2="{(h - arrow_sz):.1f}" stroke="{line_col}" stroke-width="{lw:.1f}"/>
-  <polygon points="0,{(h - arrow_sz):.1f} {arrow_sz:.1f},{(h - arrow_sz):.1f} {arrow_sz/2:.1f},{h:.1f}" fill="{line_col}"/>
+        # If it's a simple straight or orthogonal connector, build SVG with markers
+        if is_arrow or lw > 0:
+            mk_id_base = f"arr_{slide_num}_{spid or int(x)}_{int(y)}"
+            defs_list = []
+            markers = []
+
+            # OOXML: headEnd is start, tailEnd is end
+            if tail in ('triangle', 'arrow', 'stealth') or (is_arrow and not head and not tail):
+                tail_id = f"{mk_id_base}_tail"
+                defs_list.append(f'''<marker id="{tail_id}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+  <path d="M 0 1 L 8 4 L 0 7 z" fill="{line_col}"/>
+</marker>''')
+                markers.append(f'marker-end="url(#{tail_id})"')
+
+            if head in ('triangle', 'arrow', 'stealth'):
+                head_id = f"{mk_id_base}_head"
+                defs_list.append(f'''<marker id="{head_id}" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto-start-reverse">
+  <path d="M 8 1 L 0 4 L 8 7 z" fill="{line_col}"/>
+</marker>''')
+                markers.append(f'marker-start="url(#{head_id})"')
+
+            defs_html = f"<defs>\n{''.join(defs_list)}\n</defs>\n" if defs_list else ""
+            marker_attrs = (" " + " ".join(markers)) if markers else ""
+
+            if w <= 3.0:  # Vertical line
+                return f'''<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{max(w, 8.0):.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}>
+  {defs_html}<line x1="{w/2:.1f}" y1="0" x2="{w/2:.1f}" y2="{h:.1f}" stroke="{line_col}" stroke-width="{lw:.1f}"{marker_attrs}/>
+</svg>'''
+            elif h <= 3.0:  # Horizontal line
+                return f'''<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{max(h, 8.0):.1f}px;overflow:visible;"{anim_attrs}>
+  {defs_html}<line x1="0" y1="{h/2:.1f}" x2="{w:.1f}" y2="{h/2:.1f}" stroke="{line_col}" stroke-width="{lw:.1f}"{marker_attrs}/>
 </svg>'''
             else:
-                return f'<div class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{lw:.1f}px;height:{h:.1f}px;background:{line_col};"{anim_attrs}></div>'
-        elif h <= 1.0: # Horizontal line
-            if is_arrow:
-                arrow_sz = max(6.0, lw * 3.5)
-                return f'''<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{(y - arrow_sz/2):.1f}px;width:{w:.1f}px;height:{arrow_sz:.1f}px;overflow:visible;"{anim_attrs}>
-  <line x1="0" y1="{arrow_sz/2:.1f}" x2="{(w - arrow_sz):.1f}" y2="{arrow_sz/2:.1f}" stroke="{line_col}" stroke-width="{lw:.1f}"/>
-  <polygon points="{(w - arrow_sz):.1f},0 {(w - arrow_sz):.1f},{arrow_sz:.1f} {w:.1f},{arrow_sz/2:.1f}" fill="{line_col}"/>
+                # 2D angled or elbow connector
+                if 'bent' in str(geom) or 'Elbow' in sh.get('name', ''):
+                    # Stepped / elbow path
+                    mid_x = w * 0.5
+                    d_path = f"M 0 0 L {mid_x:.1f} 0 L {mid_x:.1f} {h:.1f} L {w:.1f} {h:.1f}"
+                    return f'''<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}>
+  {defs_html}<path d="{d_path}" fill="none" stroke="{line_col}" stroke-width="{lw:.1f}"{marker_attrs}/>
 </svg>'''
-            else:
-                return f'<div class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{lw:.1f}px;background:{line_col};"{anim_attrs}></div>'
-        else:
-            arrow_sz = max(8.0, lw * 3.0) if is_arrow else 0
-            if flip_h and flip_v:
-                x1, y1, x2, y2 = w, 0, 0, h
-            elif flip_v:
-                x1, y1, x2, y2 = 0, h, w, 0
-            elif flip_h:
-                x1, y1, x2, y2 = w, h, 0, 0
-            else:
-                x1, y1, x2, y2 = 0, 0, w, h
-
-            arrowhead_svg = ''
-            if is_arrow:
-                arrowhead_svg = f'''<defs>
-    <marker id="arr_{slide_num}_{int(x)}_{int(y)}" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-      <path d="M0,0 L0,6 L6,3 z" fill="{line_col}"/>
-    </marker>
-  </defs>'''
-                marker_attr = f' marker-end="url(#arr_{slide_num}_{int(x)}_{int(y)})"'
-            else:
-                marker_attr = ''
-
-            return f'''<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}>
-  {arrowhead_svg}
-  <line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{line_col}" stroke-width="{lw:.1f}"{marker_attr}/>
+                else:
+                    if flip_h and flip_v:
+                        x1, y1, x2, y2 = w, 0, 0, h
+                    elif flip_v:
+                        x1, y1, x2, y2 = 0, h, w, 0
+                    elif flip_h:
+                        x1, y1, x2, y2 = w, h, 0, 0
+                    else:
+                        x1, y1, x2, y2 = 0, 0, w, h
+                    return f'''<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}>
+  {defs_html}<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{line_col}" stroke-width="{lw:.1f}"{marker_attrs}/>
 </svg>'''
 
     # Handle Custom Geometry Paths (Freeforms, custom arrows, curved connectors)
@@ -571,6 +582,17 @@ def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
             if avail_h > len(empty_indices) * 20.0:
                 calculated_empty_ht = avail_h / len(empty_indices)
 
+        # Slide 12 service model table row alignment:
+        # Prevent any line drift or text overlapping horizontal grid lines
+        s12_spacer_map = {}
+        if slide_num == 12:
+            if spid == '9':  # Text Box 3 (Col 1)
+                s12_spacer_map = {2: 81.0, 4: 58.4, 6: 57.2, 8: 69.4, 10: 57.6}
+            elif spid == '10':  # Text Box 4 (Col 2)
+                s12_spacer_map = {2: 78.5, 4: 58.4, 6: 57.2, 8: 49.4}
+            elif spid in ('11', '12', '13', '14'):  # Cols 3 to 6
+                s12_spacer_map = {1: 69.6, 3: 58.4, 5: 57.2, 7: 69.4, 9: 57.6}
+
         auto_counters = {}
         for p_idx, p in enumerate(raw_paras):
             b = p.get('bullet', '')
@@ -581,7 +603,15 @@ def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
                 auto_idx = auto_counters[b_key]
 
             p_anim = para_anims.get((spid, p_idx))
-            custom_empty_sz = calculated_empty_ht if (p_idx in empty_indices and calculated_empty_ht) else None
+            if p_idx in s12_spacer_map:
+                custom_empty_sz = s12_spacer_map[p_idx]
+            else:
+                custom_empty_sz = calculated_empty_ht if (p_idx in empty_indices and calculated_empty_ht) else None
+
+            # On slide 12 col 2, row 5 (Diffserv) needs 37.6px margin-top to align with row 5
+            if slide_num == 12 and spid == '10' and p_idx == 11:
+                p['space_before'] = {'px': 37.6}
+
             rendered_p = render_paragraph(p, slide_num, font_scale, p_idx, p_anim, auto_idx, empty_sz_override=custom_empty_sz)
             if rendered_p:
                 p_list.append(rendered_p)

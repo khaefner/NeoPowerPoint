@@ -163,6 +163,20 @@ async function runTests() {
       throw new Error('Slide 9 missing rendered local forwarding table image (image30.png)');
     }
     console.log('✓ Validated slide 9 renders forward pointing arrow and local forwarding table image (image30.png)');
+
+    // Slide 16 arrows validation
+    const slide16 = manifest.slides[15];
+    const s16Html = await fs.promises.readFile(path.join(convertedDeckDir, slide16.path), 'utf-8');
+    if (!s16Html.includes('data-spid="22"') || !s16Html.includes('arr_16_22')) {
+      throw new Error('Slide 16 input port line 22 is missing SVG arrow marker');
+    }
+    if (!s16Html.includes('data-spid="37"') || !s16Html.includes('arr_16_37')) {
+      throw new Error('Slide 16 output port line 37 is missing SVG arrow marker');
+    }
+    if (!s16Html.includes('data-spid="16"') || !s16Html.includes('arr_16_16')) {
+      throw new Error('Slide 16 vertical line 16 is missing double-ended SVG arrow markers');
+    }
+    console.log('✓ Validated slide 16 renders horizontal port lines and vertical connector as arrows with SVG markers');
   }
 
   console.log('\n🎉 ALL PPTX ANIMATION TESTS PASSED SUCCESSFULLY!');
