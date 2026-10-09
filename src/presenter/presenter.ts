@@ -1,13 +1,15 @@
-interface PresenterWindow {
-  presenterAPI: {
-    onSyncState: (callback: (state: any) => void) => () => void;
-    navigateSlide: (index: number) => void;
-    nextSlide: () => void;
-    prevSlide: () => void;
-  };
+declare global {
+  interface Window {
+    presenterAPI: {
+      onSyncState: (callback: (state: any) => void) => () => void;
+      navigateSlide: (index: number) => void;
+      nextSlide: () => void;
+      prevSlide: () => void;
+    };
+  }
 }
 
-declare const window: Window & PresenterWindow;
+export {};
 
 let currentState: any = null;
 let timerSeconds = 0;

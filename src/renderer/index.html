@@ -35,6 +35,16 @@
       </div>
 
       <div class="toolbar-right">
+        <button id="btn-toggle-edit-mode" class="btn btn-secondary" title="Edit Slide (Ctrl+E)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          Edit Slide
+        </button>
+
+        <button id="btn-save-slide" class="btn btn-primary hidden" title="Save Slide Changes (Ctrl+S)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Slide
+        </button>
+
         <button id="btn-overview-grid" class="btn btn-secondary" title="Slide Sorter (O)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
           Slide Sorter
@@ -66,6 +76,8 @@
             <div class="dropdown-divider"></div>
             <button id="menu-new-deck">✨ New Presentation...</button>
             <button id="menu-new-slide">➕ Add New Slide...</button>
+            <button id="menu-toggle-edit">✏️ Edit Slide (Ctrl+E)</button>
+            <button id="menu-save-slide">💾 Save Slide (Ctrl+S)</button>
             <div class="dropdown-divider"></div>
             <button id="menu-reload-slide">🔄 Reload Slide (R)</button>
             <button id="menu-help-shortcuts">⌨️ Keyboard Shortcuts (?)</button>
@@ -115,7 +127,7 @@
         <!-- Presentation Slide Container (Aspect Ratio Scaled) -->
         <div id="slide-wrapper" class="slide-wrapper hidden">
           <div id="slide-box" class="slide-box">
-            <iframe id="slide-frame" class="slide-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
+            <iframe id="slide-frame" class="slide-frame"></iframe>
           </div>
         </div>
 
@@ -167,6 +179,9 @@
           <div class="shortcut-item"><kbd>→</kbd> / <kbd>Space</kbd> / <kbd>PageDown</kbd><span>Next Slide</span></div>
           <div class="shortcut-item"><kbd>←</kbd> / <kbd>Backspace</kbd> / <kbd>PageUp</kbd><span>Previous Slide</span></div>
           <div class="shortcut-item"><kbd>Home</kbd> / <kbd>End</kbd><span>First / Last Slide</span></div>
+          <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>E</kbd><span>Toggle Slide WYSIWYG Edit Mode</span></div>
+          <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>S</kbd><span>Save Slide Changes (in Edit Mode)</span></div>
+          <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>B</kbd> / <kbd>I</kbd><span>Bold / Italic (while editing text)</span></div>
           <div class="shortcut-item"><kbd>W</kbd><span>Toggle Windowed Presentation Mode (fills window)</span></div>
           <div class="shortcut-item"><kbd>F11</kbd> / <kbd>F</kbd><span>Toggle Fullscreen Mode</span></div>
           <div class="shortcut-item"><kbd>P</kbd><span>Open Presenter View (notes + timer)</span></div>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <linearGradient id="rocket-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+  </defs>
+  <path d="M24 4C24 4 14 14 14 26C14 30.42 16.5 34.25 20 36.25V42L24 40L28 42V36.25C31.5 34.25 34 30.42 34 26C34 14 24 4 24 4Z" fill="url(#rocket-grad)"/>
+  <circle cx="24" cy="22" r="4" fill="#0f172a"/>
+  <path d="M14 26L8 30V36L14 34V26Z" fill="#38bdf8" opacity="0.8"/>
+  <path d="M34 26L40 30V36L34 34V26Z" fill="#818cf8" opacity="0.8"/>
+  <circle cx="24" cy="44" r="3" fill="#f43f5e"/>
+</svg>

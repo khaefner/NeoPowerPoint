@@ -8,6 +8,7 @@ export interface ElectronAPI {
   createNewDeckDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
   loadSampleDeck: () => Promise<{ deckPath: string; manifest: DeckManifest }>;
   saveManifest: (manifest: DeckManifest) => Promise<boolean>;
+  saveSlideHtml: (slideRelPath: string, htmlContent: string) => Promise<boolean>;
   getManifest: () => Promise<DeckManifest | null>;
   addNewSlide: (title: string) => Promise<DeckManifest | null>;
   toggleFullscreen: () => Promise<boolean>;
@@ -30,6 +31,7 @@ const api: ElectronAPI = {
   createNewDeckDialog: () => ipcRenderer.invoke('dialog:create-deck'),
   loadSampleDeck: () => ipcRenderer.invoke('deck:load-sample'),
   saveManifest: (manifest) => ipcRenderer.invoke('deck:save-manifest', manifest),
+  saveSlideHtml: (slideRelPath, htmlContent) => ipcRenderer.invoke('deck:save-slide-html', slideRelPath, htmlContent),
   getManifest: () => ipcRenderer.invoke('deck:get-manifest'),
   addNewSlide: (title) => ipcRenderer.invoke('deck:add-slide', title),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen'),

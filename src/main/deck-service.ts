@@ -80,6 +80,18 @@ export class DeckService {
   }
 
   /**
+   * Saves updated HTML content for a specific slide.
+   */
+  async saveSlideHtml(deckPath: string, slideRelPath: string, htmlContent: string): Promise<boolean> {
+    const fullPath = path.resolve(deckPath, slideRelPath);
+    if (!fullPath.startsWith(path.resolve(deckPath))) {
+      throw new Error('Directory traversal attempt detected');
+    }
+    await fs.promises.writeFile(fullPath, htmlContent, 'utf-8');
+    return true;
+  }
+
+  /**
    * Saves updated manifest (e.g. reordered slides, modified notes, settings).
    */
   async saveManifest(folderPath: string, manifest: DeckManifest): Promise<void> {

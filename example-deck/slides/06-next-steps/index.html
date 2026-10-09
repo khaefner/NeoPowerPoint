@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Next Steps & Key Takeaways</title>
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    .split-layout {
+      position: absolute;
+      top: 220px;
+      left: 100px;
+      right: 100px;
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 50px;
+    }
+    .checklist-card {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 24px;
+      padding: 40px;
+      backdrop-filter: blur(16px);
+    }
+    .checklist-title {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 24px;
+    }
+    .check-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 16px 20px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      margin-bottom: 16px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .check-item:hover {
+      background: rgba(56, 189, 248, 0.08);
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+    .check-box {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      border: 2px solid #38bdf8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: #0b0f19;
+      font-weight: 800;
+      font-size: 1rem;
+      transition: all 0.2s ease;
+    }
+    .check-item.done .check-box {
+      background: #34d399;
+      border-color: #34d399;
+    }
+    .check-item.done .check-box::after {
+      content: "✓";
+      color: #052e16;
+    }
+    .check-item.done .check-text-title {
+      text-decoration: line-through;
+      color: #64748b;
+    }
+    .check-text-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 4px;
+    }
+    .check-text-desc {
+      font-size: 1.05rem;
+      color: #94a3b8;
+    }
+
+    .callout-box {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.1) 0%, rgba(129, 140, 248, 0.1) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 24px;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      height: 520px;
+    }
+    .quote-mark {
+      font-size: 4.5rem;
+      line-height: 1;
+      color: #38bdf8;
+      font-family: serif;
+    }
+    .quote-text {
+      font-size: 1.8rem;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.4;
+      margin-bottom: 24px;
+    }
+    .author-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .avatar-circle {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #38bdf8, #c084fc);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #ffffff;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Slide Header -->
+  <div class="slide-header">
+    <div>
+      <div class="slide-category">Roadmap & Wrap-Up</div>
+      <h2>Action Plan & <span class="text-gradient">Key Takeaways</span></h2>
+    </div>
+    <div class="badge">Interactive Checklist</div>
+  </div>
+
+  <!-- Draggable Floater Sticker -->
+  <div class="abs editor-draggable" style="position: absolute; left: 1620px; top: 110px; width: 200px; background: rgba(251, 191, 36, 0.15); border: 1px solid #fbbf24; padding: 10px 18px; border-radius: 12px; text-align: center; color: #fbbf24; font-weight: 700; font-size: 0.95rem;">
+    🚀 Ready for Deploy
+  </div>
+
+  <div class="split-layout">
+
+    <!-- Interactive Checklist -->
+    <div class="checklist-card">
+      <h3 class="checklist-title">Launch Preparation</h3>
+      
+      <div class="check-item done" id="item-1">
+        <div class="check-box"></div>
+        <div>
+          <div class="check-text-title">Verify Chromium Compatibility</div>
+          <div class="check-text-desc">Tested across macOS, Linux, and Windows with 100% parity.</div>
+        </div>
+      </div>
+
+      <div class="check-item done" id="item-2">
+        <div class="check-box"></div>
+        <div>
+          <div class="check-text-title">Validate WYSIWYG Editing & Save</div>
+          <div class="check-text-desc">Direct text edits, coordinate-scaled dragging, clean HTML persistence.</div>
+        </div>
+      </div>
+
+      <div class="check-item" id="item-3">
+        <div class="check-box"></div>
+        <div>
+          <div class="check-text-title">Bundle Portable .neopres Archive</div>
+          <div class="check-text-desc">Package slide assets and manifests into single-click presentations.</div>
+        </div>
+      </div>
+
+      <div class="check-item" id="item-4">
+        <div class="check-box"></div>
+        <div>
+          <div class="check-text-title">Present in Fullscreen & Multi-Monitor</div>
+          <div class="check-text-desc">Run presenter view with live notes, stopwatch timer, and slide sorter.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Draggable Callout / Quote Box -->
+    <div class="callout-box abs editor-draggable" style="position: absolute; left: 1040px; top: 0px; width: 780px;">
+      <div>
+        <div class="quote-mark">“</div>
+        <p class="quote-text">
+          Presentations shouldn't be trapped in static slides. With web tech, every slide is an interactive, editable application.
+        </p>
+      </div>
+
+      <div class="author-info">
+        <div class="avatar-circle">NP</div>
+        <div>
+          <div style="font-size: 1.25rem; font-weight: 700; color: #f1f5f9;">NeoPowerPoint Team</div>
+          <div style="font-size: 1rem; color: #94a3b8;">Engineering & Product Design</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    document.querySelectorAll('.check-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        item.classList.toggle('done');
+      });
+    });
+  </script>
+
+</body>
+</html>

@@ -13,6 +13,7 @@ export function registerCustomProtocolScheme(): void {
         secure: true,
         supportFetchAPI: true,
         corsEnabled: true,
+        bypassCSP: true,
         stream: true
       }
     }
@@ -46,17 +47,44 @@ export function setupCustomProtocolHandler(deckService: DeckService): void {
   protocol.handle('neopres', async (request) => {
     try {
       const url = new URL(request.url);
-      const activeDeckPath = deckService.getActiveDeckPath();
 
+      // Handle internal app UI files (e.g. neopres://app/renderer/index.html)
+      if (
+        url.pathname.startsWith('/renderer/') ||
+        url.pathname.startsWith('/presenter/') ||
+        url.pathname.startsWith('/preload/')
+      ) {
+        let relPath = decodeURIComponent(url.pathname);
+        if (relPath.startsWith('/')) relPath = relPath.slice(1);
+        const filePath = path.normalize(path.join(__dirname, '../', relPath));
+        if (fs.existsSync(filePath)) {
+          const ext = path.extname(filePath).toLowerCase();
+          const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+          const fileBuffer = await fs.promises.readFile(filePath);
+          return new Response(fileBuffer, {
+            status: 200,
+            headers: {
+              'Content-Type': contentType,
+              'Access-Control-Allow-Origin': '*',
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+            }
+          });
+        }
+        return new Response('App file not found', { status: 404 });
+      }
+
+      const activeDeckPath = deckService.getActiveDeckPath();
       if (!activeDeckPath) {
         return new Response('No active presentation loaded', { status: 404 });
       }
 
-      // e.g. neopres://deck/slides/01-welcome/index.html
-      // pathname is "/slides/01-welcome/index.html"
+      // e.g. neopres://app/slides/01-welcome/index.html or neopres://deck/slides/01-welcome/index.html
       let relPath = decodeURIComponent(url.pathname);
       if (relPath.startsWith('/')) {
         relPath = relPath.slice(1);
+      }
+      if (relPath.startsWith('deck/')) {
+        relPath = relPath.slice(5);
       }
 
       const filePath = path.normalize(path.join(activeDeckPath, relPath));

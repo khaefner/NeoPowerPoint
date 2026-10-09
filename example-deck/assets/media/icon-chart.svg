@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <linearGradient id="chart-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+  </defs>
+  <rect x="6" y="28" width="8" height="14" rx="2" fill="url(#chart-grad)" opacity="0.6"/>
+  <rect x="20" y="18" width="8" height="24" rx="2" fill="url(#chart-grad)" opacity="0.8"/>
+  <rect x="34" y="8" width="8" height="34" rx="2" fill="url(#chart-grad)"/>
+  <polyline points="10,24 24,14 38,4" fill="none" stroke="#f8fafc" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="38" cy="4" r="3" fill="#f43f5e"/>
+</svg>

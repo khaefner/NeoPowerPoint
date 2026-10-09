@@ -8,6 +8,8 @@ class PresentationApp {
   private manifest: DeckManifest | null = null;
   private currentIndex: number = 0;
   private isPresentationMode: boolean = false;
+  private isEditMode: boolean = false;
+  private currentScaleFactor: number = 1;
   private floatingControlsTimer: any = null;
 
   // DOM Elements
@@ -56,6 +58,8 @@ class PresentationApp {
     document.getElementById('btn-prev-slide')!.addEventListener('click', () => this.prevSlide());
     document.getElementById('btn-next-slide')!.addEventListener('click', () => this.nextSlide());
     document.getElementById('btn-toggle-sidebar')!.addEventListener('click', () => this.toggleSidebar());
+    document.getElementById('btn-toggle-edit-mode')?.addEventListener('click', () => this.toggleEditMode());
+    document.getElementById('btn-save-slide')?.addEventListener('click', () => this.saveSlideHtml());
     document.getElementById('btn-overview-grid')!.addEventListener('click', () => this.toggleOverview(true));
     document.getElementById('btn-windowed-mode')!.addEventListener('click', () => this.toggleWindowedPresentation());
     document.getElementById('btn-fullscreen-mode')!.addEventListener('click', () => this.toggleFullscreen());
@@ -77,6 +81,8 @@ class PresentationApp {
     document.getElementById('menu-export-package')!.addEventListener('click', () => this.exportPackage());
     document.getElementById('menu-new-deck')!.addEventListener('click', () => this.newDeck());
     document.getElementById('menu-new-slide')!.addEventListener('click', () => this.promptNewSlide());
+    document.getElementById('menu-toggle-edit')?.addEventListener('click', () => this.toggleEditMode());
+    document.getElementById('menu-save-slide')?.addEventListener('click', () => this.saveSlideHtml());
     document.getElementById('menu-reload-slide')!.addEventListener('click', () => this.reloadCurrentSlide());
     document.getElementById('menu-help-shortcuts')!.addEventListener('click', () => this.toggleShortcuts(true));
 
@@ -272,23 +278,46 @@ class PresentationApp {
 
   private setupIframeKeyDownBridge(iframeDoc: Document): void {
     iframeDoc.addEventListener('keydown', (e: KeyboardEvent) => {
-      // If editing text, stop navigation keys from bubbling up
       const activeEl = iframeDoc.activeElement as HTMLElement;
-      if (activeEl && activeEl.isContentEditable) {
-        if (['Space', ' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-          e.stopPropagation();
+      const isEditing = activeEl && (activeEl.isContentEditable || activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
+      if (isEditing) {
+        // Allow formatting shortcuts
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
+          e.preventDefault();
+          iframeDoc.execCommand('bold');
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'i' || e.key === 'I')) {
+          e.preventDefault();
+          iframeDoc.execCommand('italic');
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')) {
+          e.preventDefault();
+          iframeDoc.execCommand('underline');
+          return;
         }
 
-        // Handle bold and italic
-        if (e.ctrlKey || e.metaKey) {
-          if (e.key === 'b' || e.key === 'B') {
-            e.preventDefault();
-            iframeDoc.execCommand('bold');
-          } else if (e.key === 'i' || e.key === 'I') {
-            e.preventDefault();
-            iframeDoc.execCommand('italic');
-          }
+        // Handle Save or Toggle shortcuts while editing
+        if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+          e.preventDefault();
+          this.saveSlideHtml();
+          return;
         }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'e' || e.key === 'E')) {
+          e.preventDefault();
+          this.toggleEditMode();
+          return;
+        }
+        if (e.key === 'Escape') {
+          activeEl.blur();
+          return;
+        }
+
+        // Stop all other editing keys (Space, Backspace, Arrow keys, Enter, etc.) from triggering slide navigation
+        e.stopPropagation();
+        return;
       }
 
       this.handleKeyDown(e);
@@ -296,22 +325,20 @@ class PresentationApp {
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
-    if (this.isEditMode) {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
-        e.preventDefault();
-        this.saveSlideHtml();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'e' || e.key === 'E')) {
-        e.preventDefault();
-        this.toggleEditMode();
-        return;
-      }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'e' || e.key === 'E')) {
+      e.preventDefault();
+      this.toggleEditMode();
+      return;
+    }
+    if (this.isEditMode && (e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      this.saveSlideHtml();
+      return;
     }
 
-    // Ignore navigation shortcuts when editing text notes
+    // Ignore navigation shortcuts when editing text notes or inputs
     const activeEl = document.activeElement;
-    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || (activeEl as HTMLElement).isContentEditable)) {
       if (e.key === 'Escape') {
         (activeEl as HTMLElement).blur();
       }
@@ -548,10 +575,18 @@ class PresentationApp {
 
     // Update Iframe Source
     const slideUrl = `neopres://deck/${currentSlide.path}`;
+    console.log(`[NeoDeck] goToSlide(${index}): Loading ${slideUrl}`);
     this.slideFrameEl.src = slideUrl;
 
     this.slideFrameEl.onload = () => {
-      const doc = this.slideFrameEl.contentDocument;
+      console.log(`[NeoDeck] Slide iframe onload event fired.`);
+      let doc: Document | null = null;
+      try {
+        doc = this.slideFrameEl.contentDocument;
+        console.log(`[NeoDeck] contentDocument access:`, !!doc, `(doc title: "${doc?.title}")`);
+      } catch (err: any) {
+        console.error(`[NeoDeck] Security/DOM error accessing contentDocument:`, err.message);
+      }
       if (doc) {
         this.setupIframeKeyDownBridge(doc);
         if (this.isEditMode) {
@@ -888,30 +923,48 @@ class PresentationApp {
 
   toggleEditMode(): void {
     this.isEditMode = !this.isEditMode;
-    const btnToggle = document.getElementById('btn-toggle-edit-mode')!;
-    const btnSave = document.getElementById('btn-save-slide')!;
+    console.log(`[NeoEditor] toggleEditMode -> isEditMode is now: ${this.isEditMode}`);
+    const btnToggle = document.getElementById('btn-toggle-edit-mode');
+    const btnSave = document.getElementById('btn-save-slide');
 
     if (this.isEditMode) {
-      btnToggle.classList.add('active');
-      btnToggle.style.backgroundColor = 'var(--accent-primary)';
-      btnToggle.style.color = '#fff';
-      btnSave.classList.remove('hidden');
+      btnToggle?.classList.add('active');
+      if (btnToggle) {
+        btnToggle.style.backgroundColor = 'var(--accent-primary)';
+        btnToggle.style.color = '#fff';
+      }
+      btnSave?.classList.remove('hidden');
       this.enableEditModeFeatures();
     } else {
-      btnToggle.classList.remove('active');
-      btnToggle.style.backgroundColor = '';
-      btnToggle.style.color = '';
-      btnSave.classList.add('hidden');
+      btnToggle?.classList.remove('active');
+      if (btnToggle) {
+        btnToggle.style.backgroundColor = '';
+        btnToggle.style.color = '';
+      }
+      btnSave?.classList.add('hidden');
       this.disableEditModeFeatures();
     }
   }
 
   private enableEditModeFeatures(): void {
-    const doc = this.slideFrameEl.contentDocument;
-    if (!doc) return;
+    let doc: Document | null = null;
+    try {
+      doc = this.slideFrameEl.contentDocument;
+    } catch (e: any) {
+      console.error(`[NeoEditor] Cannot read contentDocument:`, e.message);
+    }
+    if (!doc) {
+      console.warn(`[NeoEditor] enableEditModeFeatures: contentDocument is null!`);
+      return;
+    }
+
+    console.log(`[NeoEditor] enableEditModeFeatures: Applying to document "${doc.title}"...`);
 
     // Make text elements contenteditable
-    const textElements = doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, span, .tb, .textbox, .card, .title, .notes');
+    const textElements = doc.querySelectorAll(
+      'p, h1, h2, h3, h4, h5, h6, li, span, a, b, strong, em, i, u, label, button, th, td, blockquote, figcaption, .badge, [class*="title"], [class*="desc"], [class*="subtitle"], [class*="header"], [class*="text"], [class*="card"], [class*="label"], [class*="pill"], [class*="stat"], [class*="kicker"], [class*="category"], [class*="note"], .tb, .textbox'
+    );
+    console.log(`[NeoEditor] Found ${textElements.length} editable text elements.`);
     textElements.forEach(el => {
       (el as HTMLElement).setAttribute('contenteditable', 'true');
       (el as HTMLElement).classList.add('editor-editable-text');
@@ -923,6 +976,7 @@ class PresentationApp {
 
     // Make positioned elements draggable
     const positionedElements = doc.querySelectorAll('.abs, .tb, img, .pic, .editor-draggable, [style*="position: absolute"], [style*="position: fixed"]');
+    console.log(`[NeoEditor] Found ${positionedElements.length} positioned draggable elements.`);
     positionedElements.forEach(el => {
       const htmlEl = el as HTMLElement;
       // Skip if it's already an editable text element, text editing takes precedence on mousedown
@@ -977,25 +1031,43 @@ class PresentationApp {
       htmlEl.addEventListener('mousedown', onMouseDown);
     });
 
+    // Intercept clicks in edit mode so slide scripts don't conflict with text editing
+    const onEditClickCapture = (e: MouseEvent) => {
+      if (!this.isEditMode) return;
+      const target = e.target as HTMLElement;
+      if (target && target.closest('.editor-editable-text')) {
+        e.stopPropagation();
+      }
+    };
+    (doc as any)._onEditClickCapture = onEditClickCapture;
+    doc.addEventListener('click', onEditClickCapture, true);
+
     // Inject temporary styles for outlines
     let styleEl = doc.getElementById('neo-editor-styles');
     if (!styleEl) {
       styleEl = doc.createElement('style');
       styleEl.id = 'neo-editor-styles';
       styleEl.textContent = `
-        .editor-editable-text { outline: 1px dashed rgba(56, 189, 248, 0.5); }
-        .editor-editable-text:focus { outline: 2px solid #38bdf8; background: rgba(56, 189, 248, 0.1); }
+        .editor-editable-text { outline: 1px dashed rgba(56, 189, 248, 0.5) !important; cursor: text !important; }
+        .editor-editable-text:focus { outline: 2px solid #38bdf8 !important; background: rgba(56, 189, 248, 0.1) !important; }
         .editor-draggable { cursor: move; }
         .editor-draggable:hover { outline: 1px dashed rgba(248, 113, 113, 0.5); }
         .editor-selected { outline: 2px solid #f87171 !important; z-index: 9999; }
       `;
       doc.head.appendChild(styleEl);
     }
+    console.log(`[NeoEditor] Outlines and editor styles injected successfully.`);
   }
 
   private disableEditModeFeatures(): void {
+    console.log(`[NeoEditor] disableEditModeFeatures called.`);
     const doc = this.slideFrameEl.contentDocument;
     if (!doc) return;
+
+    if ((doc as any)._onEditClickCapture) {
+      doc.removeEventListener('click', (doc as any)._onEditClickCapture, true);
+      delete (doc as any)._onEditClickCapture;
+    }
 
     doc.querySelectorAll('.editor-editable-text').forEach(el => {
       (el as HTMLElement).removeAttribute('contenteditable');
@@ -1017,6 +1089,7 @@ class PresentationApp {
 
   private async saveSlideHtml(): Promise<void> {
     if (!this.manifest || !this.manifest.slides[this.currentIndex]) return;
+    console.log(`[NeoEditor] saveSlideHtml: saving slide index ${this.currentIndex}...`);
     const doc = this.slideFrameEl.contentDocument;
     if (!doc) return;
 
@@ -1055,6 +1128,10 @@ class PresentationApp {
       this.flashLiveBadge(); // Provide visual feedback for save
       // Ensure the thumbnail is updated after saving
       this.reloadCurrentSlide();
+      // Automatically exit edit mode after saving
+      if (this.isEditMode) {
+        this.toggleEditMode();
+      }
     }
   }
 

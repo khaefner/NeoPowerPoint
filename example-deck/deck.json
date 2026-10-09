@@ -1,0 +1,60 @@
+{
+  "version": "1.0.0",
+  "title": "Modern Product Overview & Architecture",
+  "author": "NeoPowerPoint Team",
+  "aspectRatio": "16:9",
+  "customWidth": 1920,
+  "customHeight": 1080,
+  "theme": "dark",
+  "defaultTransition": "fade",
+  "slides": [
+    {
+      "id": "slide-1",
+      "title": "Introduction: Next-Gen Web Presentations",
+      "path": "slides/01-intro/index.html",
+      "notes": "Welcome attendees. Today we are demonstrating live interactive slides, WYSIWYG element editing, and drag-and-drop repositioning.",
+      "durationSec": 60,
+      "transition": "fade"
+    },
+    {
+      "id": "slide-2",
+      "title": "Core Platform Capabilities",
+      "path": "slides/02-features/index.html",
+      "notes": "Walk through the 3 core pillars. Highlight that all text boxes and cards can be directly clicked and edited.",
+      "durationSec": 90,
+      "transition": "fade"
+    },
+    {
+      "id": "slide-3",
+      "title": "Modular System Architecture",
+      "path": "slides/03-architecture/index.html",
+      "notes": "Explain how the renderer isolates slides inside sandboxed iframes while maintaining high-performance IPC with the main process.",
+      "durationSec": 120,
+      "transition": "fade"
+    },
+    {
+      "id": "slide-4",
+      "title": "Performance & Live Metrics",
+      "path": "slides/04-metrics-analytics/index.html",
+      "notes": "Click through the quarter filters (Q1-Q4) to showcase live SVG/CSS bar chart data re-rendering in real time.",
+      "durationSec": 90,
+      "transition": "fade"
+    },
+    {
+      "id": "slide-5",
+      "title": "Interactive Canvas Dynamics",
+      "path": "slides/05-interactive-demo/index.html",
+      "notes": "Move and drag the cursor across the canvas to show off 60 FPS hardware-accelerated particle dynamics.",
+      "durationSec": 90,
+      "transition": "fade"
+    },
+    {
+      "id": "slide-6",
+      "title": "Next Steps & Key Takeaways",
+      "path": "slides/06-next-steps/index.html",
+      "notes": "Summarize the key takeaways and click the checklist items to mark them complete.",
+      "durationSec": 60,
+      "transition": "fade"
+    }
+  ]
+}

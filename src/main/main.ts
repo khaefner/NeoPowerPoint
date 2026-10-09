@@ -35,10 +35,15 @@ function createMainWindow(): void {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      webSecurity: false,
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  mainWindow.webContents.on('console-message', (_event, _level, message) => {
+    console.log(`[RENDERER CONSOLE]: ${message}`);
+  });
+
+  mainWindow.loadURL('neopres://deck/renderer/index.html');
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -76,10 +81,15 @@ function openPresenterWindow(): boolean {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      webSecurity: false,
     }
   });
 
-  presenterWindow.loadFile(path.join(__dirname, '../presenter/index.html'));
+  presenterWindow.webContents.on('console-message', (_event, _level, message) => {
+    console.log(`[PRESENTER CONSOLE]: ${message}`);
+  });
+
+  presenterWindow.loadURL('neopres://deck/presenter/index.html');
 
   presenterWindow.webContents.on('did-finish-load', () => {
     if (latestPresenterState && presenterWindow && !presenterWindow.isDestroyed()) {
@@ -337,6 +347,12 @@ ipcMain.handle('deck:save-manifest', async (_, manifest: DeckManifest) => {
   if (!activePath) return false;
   await deckService.saveManifest(activePath, manifest);
   return true;
+});
+
+ipcMain.handle('deck:save-slide-html', async (_, slideRelPath: string, htmlContent: string) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return false;
+  return deckService.saveSlideHtml(activePath, slideRelPath, htmlContent);
 });
 
 ipcMain.handle('deck:get-manifest', async () => {
