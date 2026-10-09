@@ -152,6 +152,16 @@ function buildAppMenu(): void {
             }
           }
         },
+        {
+          label: 'Import PowerPoint (.pptx)...',
+          accelerator: 'CmdOrCtrl+I',
+          click: async () => {
+            if (mainWindow) {
+              const res = await handleImportPptx();
+              if (res) mainWindow.webContents.send('deck:loaded', res);
+            }
+          }
+        },
         { type: 'separator' },
         {
           label: 'Export as .neopres Package...',
@@ -342,9 +352,31 @@ async function handleCreateDeck() {
   return deckData;
 }
 
+async function handleImportPptx() {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select PowerPoint Presentation (.pptx)',
+    filters: [
+      { name: 'PowerPoint Presentation (*.pptx, *.ppt)', extensions: ['pptx', 'ppt'] },
+      { name: 'All Files', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const pptxPath = result.filePaths[0];
+  const deckData = await deckService.importPptx(pptxPath);
+  deckWatcher.watch(deckData.deckPath);
+  return deckData;
+}
+
 // IPC Handlers
 ipcMain.handle('dialog:open-folder', async () => handleOpenFolder());
 ipcMain.handle('dialog:open-package', async () => handleOpenPackage());
+ipcMain.handle('dialog:import-pptx', async () => handleImportPptx());
 ipcMain.handle('dialog:export-package', async () => handleExportPackage());
 ipcMain.handle('dialog:create-deck', async () => handleCreateDeck());
 

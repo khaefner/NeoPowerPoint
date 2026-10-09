@@ -4,6 +4,7 @@ import { DeckManifest } from '../types/deck';
 export interface ElectronAPI {
   openFolderDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
   openPackageDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
+  importPptxDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
   exportPackageDialog: () => Promise<string | null>;
   createNewDeckDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
   loadSampleDeck: () => Promise<{ deckPath: string; manifest: DeckManifest }>;
@@ -18,6 +19,7 @@ export interface ElectronAPI {
   syncStateToPresenter: (state: any) => void;
   onFileChanged: (callback: (data: { filePath: string; eventType: string }) => void) => () => void;
   onNavigateSlide: (callback: (index: number) => void) => () => void;
+  onDeckLoadedEvent: (callback: (data: { deckPath: string; manifest: DeckManifest }) => void) => () => void;
   onToggleFullscreenEvent: (callback: () => void) => () => void;
   onToggleWindowedEvent: (callback: () => void) => () => void;
   onOpenPresenterEvent: (callback: () => void) => () => void;
@@ -28,6 +30,7 @@ export interface ElectronAPI {
 const api: ElectronAPI = {
   openFolderDialog: () => ipcRenderer.invoke('dialog:open-folder'),
   openPackageDialog: () => ipcRenderer.invoke('dialog:open-package'),
+  importPptxDialog: () => ipcRenderer.invoke('dialog:import-pptx'),
   exportPackageDialog: () => ipcRenderer.invoke('dialog:export-package'),
   createNewDeckDialog: () => ipcRenderer.invoke('dialog:create-deck'),
   loadSampleDeck: () => ipcRenderer.invoke('deck:load-sample'),
@@ -51,6 +54,12 @@ const api: ElectronAPI = {
     const handler = (_: any, index: number) => callback(index);
     ipcRenderer.on('slide:navigate', handler);
     return () => ipcRenderer.removeListener('slide:navigate', handler);
+  },
+
+  onDeckLoadedEvent: (callback) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('deck:loaded', handler);
+    return () => ipcRenderer.removeListener('deck:loaded', handler);
   },
 
   onToggleFullscreenEvent: (callback) => {

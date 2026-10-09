@@ -127,6 +127,7 @@ class PresentationApp {
     // Menu Actions
     document.getElementById('menu-open-folder')!.addEventListener('click', () => this.openFolder());
     document.getElementById('menu-open-package')!.addEventListener('click', () => this.openPackage());
+    document.getElementById('menu-import-pptx')?.addEventListener('click', () => this.importPptx());
     document.getElementById('menu-export-package')!.addEventListener('click', () => this.exportPackage());
     document.getElementById('menu-new-deck')!.addEventListener('click', () => this.newDeck());
     document.getElementById('menu-new-slide')!.addEventListener('click', () => this.promptNewSlide());
@@ -143,6 +144,7 @@ class PresentationApp {
     document.getElementById('btn-welcome-sample')!.addEventListener('click', () => this.loadSampleDeck());
     document.getElementById('btn-welcome-open-folder')!.addEventListener('click', () => this.openFolder());
     document.getElementById('btn-welcome-open-package')!.addEventListener('click', () => this.openPackage());
+    document.getElementById('btn-welcome-import-pptx')?.addEventListener('click', () => this.importPptx());
     document.getElementById('btn-welcome-new')!.addEventListener('click', () => this.newDeck());
 
     // Sidebar & Notes
@@ -313,6 +315,12 @@ class PresentationApp {
 
     window.electronAPI.onReloadSlideEvent(() => {
       this.reloadCurrentSlide();
+    });
+
+    window.electronAPI.onDeckLoadedEvent?.((res) => {
+      if (res && res.deckPath && res.manifest) {
+        this.loadDeck(res.deckPath, res.manifest);
+      }
     });
 
     window.electronAPI.onSetPresentationModeEvent?.((enabled: boolean) => {
@@ -499,6 +507,11 @@ class PresentationApp {
 
   async openPackage(): Promise<void> {
     const res = await window.electronAPI.openPackageDialog();
+    if (res) this.loadDeck(res.deckPath, res.manifest);
+  }
+
+  async importPptx(): Promise<void> {
+    const res = await window.electronAPI.importPptxDialog();
     if (res) this.loadDeck(res.deckPath, res.manifest);
   }
 

@@ -34,6 +34,9 @@ async function copyStaticAssets() {
   if (fs.existsSync('src/presenter/presenter.css')) {
     await fs.promises.copyFile('src/presenter/presenter.css', 'dist/presenter/presenter.css');
   }
+  if (fs.existsSync('src/converter')) {
+    await copyDir('src/converter', 'dist/converter');
+  }
 }
 
 async function build() {
