@@ -22,6 +22,7 @@ export interface ElectronAPI {
   onToggleWindowedEvent: (callback: () => void) => () => void;
   onOpenPresenterEvent: (callback: () => void) => () => void;
   onReloadSlideEvent: (callback: () => void) => () => void;
+  onSetPresentationModeEvent: (callback: (enabled: boolean) => void) => () => void;
 }
 
 const api: ElectronAPI = {
@@ -74,6 +75,12 @@ const api: ElectronAPI = {
     const handler = () => callback();
     ipcRenderer.on('menu:reload-slide', handler);
     return () => ipcRenderer.removeListener('menu:reload-slide', handler);
+  },
+
+  onSetPresentationModeEvent: (callback) => {
+    const handler = (_: any, enabled: boolean) => callback(enabled);
+    ipcRenderer.on('deck:set-presentation-mode', handler);
+    return () => ipcRenderer.removeListener('deck:set-presentation-mode', handler);
   }
 };
 

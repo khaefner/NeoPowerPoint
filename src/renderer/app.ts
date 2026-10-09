@@ -314,6 +314,22 @@ class PresentationApp {
     window.electronAPI.onReloadSlideEvent(() => {
       this.reloadCurrentSlide();
     });
+
+    window.electronAPI.onSetPresentationModeEvent?.((enabled: boolean) => {
+      this.isPresentationMode = enabled;
+      document.body.classList.toggle('mode-presentation', enabled);
+      this.floatingControlsEl.classList.toggle('hidden', !enabled);
+      if (enabled) {
+        this.disableEditModeFeatures();
+        this.editorToolbarEl?.classList.add('hidden');
+      } else {
+        if (this.isEditMode) {
+          this.editorToolbarEl?.classList.remove('hidden');
+          this.enableEditModeFeatures();
+        }
+      }
+      window.dispatchEvent(new Event('resize'));
+    });
   }
 
   private setupIframeMessageBridge(): void {

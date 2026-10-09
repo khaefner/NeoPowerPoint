@@ -62,16 +62,30 @@ function openPresenterWindow(): boolean {
     return true;
   }
 
-  // Find a secondary display if available
+  // Find displays
   const displays = screen.getAllDisplays();
   const primaryDisplay = screen.getPrimaryDisplay();
-  const secondaryDisplay = displays.find(d => d.id !== primaryDisplay.id) || primaryDisplay;
+  const secondaryDisplay = displays.find(d => d.id !== primaryDisplay.id);
 
+  // Automatically put audience presentation window into Fullscreen
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (secondaryDisplay) {
+      // If external projector/secondary monitor is attached, place audience window there
+      mainWindow.setBounds(secondaryDisplay.bounds);
+      mainWindow.setFullScreen(true);
+    } else {
+      // On single monitor, audience window goes fullscreen presentation
+      mainWindow.setFullScreen(true);
+    }
+    mainWindow.webContents.send('deck:set-presentation-mode', true);
+  }
+
+  // Open Presenter View on the primary presenter monitor
   presenterWindow = new BrowserWindow({
-    x: secondaryDisplay.bounds.x + 50,
-    y: secondaryDisplay.bounds.y + 50,
-    width: 1024,
-    height: 700,
+    x: primaryDisplay.bounds.x + 40,
+    y: primaryDisplay.bounds.y + 40,
+    width: Math.min(1150, primaryDisplay.bounds.width - 80),
+    height: Math.min(780, primaryDisplay.bounds.height - 80),
     minWidth: 700,
     minHeight: 500,
     title: 'NeoPowerPoint — Presenter View',
@@ -99,6 +113,12 @@ function openPresenterWindow(): boolean {
 
   presenterWindow.on('closed', () => {
     presenterWindow = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isFullScreen()) {
+        mainWindow.setFullScreen(false);
+      }
+      mainWindow.webContents.send('deck:set-presentation-mode', false);
+    }
   });
 
   return true;
