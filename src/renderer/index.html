@@ -76,7 +76,8 @@
             <button id="menu-export-package">💾 Export as .neopres...</button>
             <div class="dropdown-divider"></div>
             <button id="menu-new-deck">✨ New Presentation...</button>
-            <button id="menu-new-slide">➕ Add New Slide...</button>
+            <button id="menu-new-slide">➕ Add Blank Slide...</button>
+            <button id="menu-new-web-slide">🌐 Embed Web Page Slide...</button>
             <button id="menu-toggle-edit">✏️ Edit Slide (Ctrl+E)</button>
             <button id="menu-save-slide">💾 Save Slide (Ctrl+S)</button>
             <div class="dropdown-divider"></div>
@@ -173,7 +174,10 @@
       <aside id="sidebar-slides" class="sidebar">
         <div class="sidebar-header">
           <h3>Slides</h3>
-          <button id="btn-sidebar-add-slide" class="btn btn-sm btn-secondary" title="Add Slide">+</button>
+          <div style="display: flex; gap: 4px;">
+            <button id="btn-sidebar-add-web-slide" class="btn btn-sm btn-secondary" title="Embed Web Page Slide">🌐 Web</button>
+            <button id="btn-sidebar-add-slide" class="btn btn-sm btn-secondary" title="Add Slide">+</button>
+          </div>
         </div>
         <div id="slides-list" class="slides-list">
           <!-- Slide items generated dynamically -->
@@ -325,6 +329,33 @@
           <div class="shortcut-item"><kbd>R</kbd><span>Reload Slide (Live Edit Refresh)</span></div>
           <div class="shortcut-item"><kbd>S</kbd><span>Toggle Slide Manager Sidebar</span></div>
           <div class="shortcut-item"><kbd>?</kbd><span>Show Keyboard Shortcuts</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Embed Web Page Slide Modal -->
+    <div id="web-slide-modal" class="modal-overlay hidden">
+      <div class="modal-card" style="width: 560px;">
+        <div class="modal-header">
+          <h3>🌐 Embed Web Page Slide</h3>
+          <button id="btn-close-web-modal" class="btn-icon">✕</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <p style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.5; margin: 0;">
+            Embed live external websites, interactive simulations, visualizations, or documents. Built-in scaling fits standard desktop pages to the presentation canvas, with a one-click toggle for full scrollable view.
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label for="input-web-title" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main);">Slide Title</label>
+            <input type="text" id="input-web-title" class="editor-select" style="width: 100%; padding: 8px 12px; font-size: 0.9rem;" value="Interactive Simulation" placeholder="e.g. End-to-End Throughput Simulation">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label for="input-web-url" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main);">Website URL (https://...)</label>
+            <input type="url" id="input-web-url" class="editor-select" style="width: 100%; padding: 8px 12px; font-size: 0.9rem;" value="https://gaia.cs.umass.edu/kurose_ross/interactive/end-end-throughput-simple.php" placeholder="https://example.com">
+          </div>
+          <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px;">
+            <button id="btn-cancel-web-modal" class="btn btn-secondary">Cancel</button>
+            <button id="btn-confirm-web-modal" class="btn btn-primary">➕ Create Web Slide</button>
+          </div>
         </div>
       </div>
     </div>

@@ -453,6 +453,308 @@ export class DeckService {
     return manifest;
   }
 
+  /**
+   * Adds an interactive embedded web page slide with scaling and scroll toggle.
+   */
+  async addWebSlide(folderPath: string, title: string, url: string): Promise<DeckManifest> {
+    const manifestPath = path.join(folderPath, 'deck.json');
+    const raw = await fs.promises.readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(raw) as DeckManifest;
+
+    const slideIndex = manifest.slides.length + 1;
+    const folderSlug = `${String(slideIndex).padStart(2, '0')}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'web-slide'}`;
+    const slideDir = path.join(folderPath, 'slides', folderSlug);
+    await fs.promises.mkdir(slideDir, { recursive: true });
+
+    const safeUrl = (url || '').trim() || 'https://gaia.cs.umass.edu/kurose_ross/interactive/end-end-throughput-simple.php';
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #090d16;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .web-slide-container {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+      position: relative;
+      background: #090d16;
+    }
+    .web-slide-header {
+      height: 48px;
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      background: rgba(15, 23, 42, 0.95);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(8px);
+      z-index: 10;
+    }
+    .web-slide-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      overflow: hidden;
+    }
+    .web-slide-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #38bdf8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .web-slide-link {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: all 0.2s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 400px;
+    }
+    .web-slide-link:hover {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.1);
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+    .web-slide-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .web-toggle-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border-radius: 6px;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+    .web-toggle-btn:hover {
+      background: rgba(56, 189, 248, 0.28);
+      border-color: #38bdf8;
+      color: #fff;
+    }
+    .web-reload-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.05);
+      color: #94a3b8;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .web-reload-btn:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .web-viewport {
+      flex: 1;
+      width: 100%;
+      position: relative;
+      background: #ffffff;
+      overflow: hidden;
+    }
+    /* Mode 1: Fit mode (scaled to fit viewport without cropping) */
+    .mode-fit .web-viewport {
+      overflow: hidden;
+    }
+    .mode-fit #web-frame-scaler {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+      /* default virtual viewport for desktop sites */
+      width: 1280px;
+      height: 800px;
+    }
+    .mode-fit #web-frame {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+      background: #ffffff;
+    }
+    /* Mode 2: Scroll mode (natural dimensions, scrollbars active) */
+    .mode-scroll .web-viewport {
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .mode-scroll #web-frame-scaler {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transform: none !important;
+    }
+    .mode-scroll #web-frame {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+      background: #ffffff;
+    }
+  </style>
+</head>
+<body class="mode-fit">
+  <div class="web-slide-container" id="web-container">
+    <header class="web-slide-header">
+      <div class="web-slide-title-wrap">
+        <h2 class="web-slide-title">${title}</h2>
+        <a class="web-slide-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="Open in external browser window">
+          🔗 ${safeUrl}
+        </a>
+      </div>
+      <div class="web-slide-actions">
+        <button id="btn-toggle-mode" class="web-toggle-btn" title="Toggle between Fit to Slide and Scrollable Native View">
+          <span id="mode-icon">🔍</span>
+          <span id="mode-label">Mode: Fit to Slide</span>
+        </button>
+        <button id="btn-refresh-frame" class="web-reload-btn" title="Reload Web Page">🔄</button>
+      </div>
+    </header>
+
+    <div class="web-viewport" id="web-viewport">
+      <div id="web-frame-scaler">
+        <iframe id="web-frame" src="${safeUrl}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const body = document.body;
+      const viewport = document.getElementById('web-viewport');
+      const scaler = document.getElementById('web-frame-scaler');
+      const frame = document.getElementById('web-frame');
+      const toggleBtn = document.getElementById('btn-toggle-mode');
+      const reloadBtn = document.getElementById('btn-refresh-frame');
+      const modeLabel = document.getElementById('mode-label');
+      const modeIcon = document.getElementById('mode-icon');
+
+      let isFitMode = true;
+      const virtualWidth = 1280;
+      const virtualHeight = 800;
+
+      function updateScaling() {
+        if (!isFitMode) {
+          scaler.style.transform = 'none';
+          scaler.style.width = '100%';
+          scaler.style.height = '100%';
+          return;
+        }
+
+        const availW = viewport.clientWidth;
+        const availH = viewport.clientHeight;
+        if (availW <= 0 || availH <= 0) return;
+
+        const scaleX = availW / virtualWidth;
+        const scaleY = availH / virtualHeight;
+        const scale = Math.min(scaleX, scaleY);
+
+        scaler.style.width = virtualWidth + 'px';
+        scaler.style.height = virtualHeight + 'px';
+        scaler.style.transform = 'scale(' + scale + ')';
+
+        // Center horizontally and vertically within the available slide viewport
+        const offsetX = Math.max(0, (availW - virtualWidth * scale) / 2);
+        const offsetY = Math.max(0, (availH - virtualHeight * scale) / 2);
+        scaler.style.left = offsetX + 'px';
+        scaler.style.top = offsetY + 'px';
+      }
+
+      function setFitMode(fit) {
+        isFitMode = fit;
+        if (isFitMode) {
+          body.classList.remove('mode-scroll');
+          body.classList.add('mode-fit');
+          modeIcon.textContent = '🔍';
+          modeLabel.textContent = 'Mode: Fit to Slide';
+          toggleBtn.title = 'Current: Scaled to fit slide. Click to switch to Scrollable view.';
+        } else {
+          body.classList.remove('mode-fit');
+          body.classList.add('mode-scroll');
+          scaler.style.left = '0px';
+          scaler.style.top = '0px';
+          modeIcon.textContent = '📜';
+          modeLabel.textContent = 'Mode: Scrollable';
+          toggleBtn.title = 'Current: Full scrollable page. Click to switch to Fit to Slide.';
+        }
+        updateScaling();
+      }
+
+      toggleBtn.addEventListener('click', function() {
+        setFitMode(!isFitMode);
+      });
+
+      reloadBtn.addEventListener('click', function() {
+        if (frame) {
+          frame.src = frame.src;
+        }
+      });
+
+      window.addEventListener('resize', updateScaling);
+      window.addEventListener('DOMContentLoaded', updateScaling);
+      // Run immediately
+      updateScaling();
+    })();
+  </script>
+</body>
+</html>`;
+
+    await fs.promises.writeFile(path.join(slideDir, 'index.html'), htmlContent, 'utf-8');
+
+    const newSlide: SlideMetadata = {
+      id: `slide-${Date.now()}`,
+      title,
+      path: path.posix.join('slides', folderSlug, 'index.html'),
+      notes: `Embedded interactive webpage: ${safeUrl}`,
+      transition: 'fade'
+    };
+
+    manifest.slides.push(newSlide);
+    await this.saveManifest(folderPath, manifest);
+    return manifest;
+  }
+
   private async autoDiscoverDeck(folderPath: string): Promise<DeckManifest> {
     const slides: SlideMetadata[] = [];
     const findHtmlFiles = async (dir: string, prefix = '') => {

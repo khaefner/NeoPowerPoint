@@ -12,6 +12,7 @@ export interface ElectronAPI {
   saveSlideHtml: (slideRelPath: string, htmlContent: string) => Promise<boolean>;
   getManifest: () => Promise<DeckManifest | null>;
   addNewSlide: (title: string) => Promise<DeckManifest | null>;
+  addWebSlide: (title: string, url: string) => Promise<DeckManifest | null>;
   toggleFullscreen: () => Promise<boolean>;
   setWindowedPresentation: (enabled: boolean) => Promise<void>;
   openPresenterWindow: () => Promise<boolean>;
@@ -38,6 +39,7 @@ const api: ElectronAPI = {
   saveSlideHtml: (slideRelPath, htmlContent) => ipcRenderer.invoke('deck:save-slide-html', slideRelPath, htmlContent),
   getManifest: () => ipcRenderer.invoke('deck:get-manifest'),
   addNewSlide: (title) => ipcRenderer.invoke('deck:add-slide', title),
+  addWebSlide: (title, url) => ipcRenderer.invoke('deck:add-web-slide', title, url),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen'),
   setWindowedPresentation: (enabled) => ipcRenderer.invoke('window:set-windowed', enabled),
   openPresenterWindow: () => ipcRenderer.invoke('presenter:open'),

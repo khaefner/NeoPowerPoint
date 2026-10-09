@@ -428,6 +428,12 @@ ipcMain.handle('deck:add-slide', async (_, title: string) => {
   return deckService.addNewSlide(activePath, title);
 });
 
+ipcMain.handle('deck:add-web-slide', async (_, title: string, url: string) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.addWebSlide(activePath, title, url);
+});
+
 ipcMain.handle('window:toggle-fullscreen', async () => {
   if (!mainWindow) return false;
   const isFs = !mainWindow.isFullScreen();

@@ -133,6 +133,7 @@ class PresentationApp {
     document.getElementById('menu-export-package')!.addEventListener('click', () => this.exportPackage());
     document.getElementById('menu-new-deck')!.addEventListener('click', () => this.newDeck());
     document.getElementById('menu-new-slide')!.addEventListener('click', () => this.promptNewSlide());
+    document.getElementById('menu-new-web-slide')?.addEventListener('click', () => this.openWebSlideModal());
     document.getElementById('menu-toggle-edit')?.addEventListener('click', () => this.toggleEditMode());
     document.getElementById('menu-save-slide')?.addEventListener('click', () => this.saveSlideHtml());
     document.getElementById('menu-trans-fade')?.addEventListener('click', () => this.setDeckTransition('fade'));
@@ -151,6 +152,7 @@ class PresentationApp {
 
     // Sidebar & Notes
     document.getElementById('btn-sidebar-add-slide')!.addEventListener('click', () => this.promptNewSlide());
+    document.getElementById('btn-sidebar-add-web-slide')?.addEventListener('click', () => this.openWebSlideModal());
     document.getElementById('btn-save-notes')!.addEventListener('click', () => this.saveNotes());
     document.getElementById('btn-expand-notes')?.addEventListener('click', () => this.toggleNotesModal(true));
     document.getElementById('btn-close-notes-modal')?.addEventListener('click', () => this.toggleNotesModal(false));
@@ -162,6 +164,9 @@ class PresentationApp {
     // Modals
     document.getElementById('btn-close-overview')!.addEventListener('click', () => this.toggleOverview(false));
     document.getElementById('btn-close-shortcuts')!.addEventListener('click', () => this.toggleShortcuts(false));
+    document.getElementById('btn-close-web-modal')?.addEventListener('click', () => this.closeWebSlideModal());
+    document.getElementById('btn-cancel-web-modal')?.addEventListener('click', () => this.closeWebSlideModal());
+    document.getElementById('btn-confirm-web-modal')?.addEventListener('click', () => this.submitWebSlideModal());
 
     // Slide Sorter thumbnail size controls
     const btnSm = document.getElementById('btn-sorter-size-sm');
@@ -1070,6 +1075,50 @@ class PresentationApp {
     if (!title) return;
 
     const updatedManifest = await window.electronAPI.addNewSlide(title);
+    if (updatedManifest) {
+      this.manifest = updatedManifest;
+      this.renderSidebarSlides();
+      this.goToSlide(this.manifest.slides.length - 1);
+    }
+  }
+
+  private openWebSlideModal(): void {
+    if (!this.deckPath) {
+      alert('Please open or create a presentation first.');
+      return;
+    }
+    const modal = document.getElementById('web-slide-modal');
+    if (modal) {
+      modal.classList.remove('hidden');
+      const inputUrl = document.getElementById('input-web-url') as HTMLInputElement;
+      if (inputUrl) {
+        inputUrl.focus();
+        inputUrl.select();
+      }
+    }
+  }
+
+  private closeWebSlideModal(): void {
+    const modal = document.getElementById('web-slide-modal');
+    if (modal) {
+      modal.classList.add('hidden');
+    }
+  }
+
+  private async submitWebSlideModal(): Promise<void> {
+    if (!this.deckPath) {
+      alert('Please open or create a presentation first.');
+      return;
+    }
+    const titleInput = document.getElementById('input-web-title') as HTMLInputElement;
+    const urlInput = document.getElementById('input-web-url') as HTMLInputElement;
+
+    const title = (titleInput?.value || '').trim() || 'Interactive Web Page';
+    const url = (urlInput?.value || '').trim() || 'https://gaia.cs.umass.edu/kurose_ross/interactive/end-end-throughput-simple.php';
+
+    this.closeWebSlideModal();
+
+    const updatedManifest = await window.electronAPI.addWebSlide(title, url);
     if (updatedManifest) {
       this.manifest = updatedManifest;
       this.renderSidebarSlides();
