@@ -79,6 +79,12 @@
             <button id="menu-toggle-edit">✏️ Edit Slide (Ctrl+E)</button>
             <button id="menu-save-slide">💾 Save Slide (Ctrl+S)</button>
             <div class="dropdown-divider"></div>
+            <div style="padding: 4px 12px 2px; font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Transition Effect</div>
+            <button id="menu-trans-fade">✨ Dissolve / Fade (Default)</button>
+            <button id="menu-trans-slide">➡️ Slide Push</button>
+            <button id="menu-trans-zoom">🔍 Zoom</button>
+            <button id="menu-trans-none">⚡ Cut (Instant)</button>
+            <div class="dropdown-divider"></div>
             <button id="menu-reload-slide">🔄 Reload Slide (R)</button>
             <button id="menu-help-shortcuts">⌨️ Keyboard Shortcuts (?)</button>
           </div>
@@ -201,7 +207,8 @@
         <!-- Presentation Slide Container (Aspect Ratio Scaled) -->
         <div id="slide-wrapper" class="slide-wrapper hidden">
           <div id="slide-box" class="slide-box">
-            <iframe id="slide-frame" class="slide-frame"></iframe>
+            <iframe id="slide-frame-a" class="slide-frame slide-frame-active"></iframe>
+            <iframe id="slide-frame-b" class="slide-frame slide-frame-idle"></iframe>
           </div>
         </div>
 

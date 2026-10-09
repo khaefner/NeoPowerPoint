@@ -16,7 +16,20 @@ class PresentationApp {
   private emptyStateEl = document.getElementById('empty-state')!;
   private slideWrapperEl = document.getElementById('slide-wrapper')!;
   private slideBoxEl = document.getElementById('slide-box')!;
-  private slideFrameEl = document.getElementById('slide-frame') as HTMLIFrameElement;
+  private slideFrameA = document.getElementById('slide-frame-a') as HTMLIFrameElement;
+  private slideFrameB = document.getElementById('slide-frame-b') as HTMLIFrameElement;
+  private activeFrameIndex: 0 | 1 = 0;
+  private transitionTimer: any = null;
+  private navSequence: number = 0;
+  private currentTransitionOverride: string | null = null;
+
+  get slideFrameEl(): HTMLIFrameElement {
+    return this.activeFrameIndex === 0 ? this.slideFrameA : this.slideFrameB;
+  }
+
+  get idleFrameEl(): HTMLIFrameElement {
+    return this.activeFrameIndex === 0 ? this.slideFrameB : this.slideFrameA;
+  }
   private stageEl = document.getElementById('viewport-stage')!;
   private sidebarEl = document.getElementById('sidebar-slides')!;
   private slidesListEl = document.getElementById('slides-list')!;
@@ -111,6 +124,10 @@ class PresentationApp {
     document.getElementById('menu-new-slide')!.addEventListener('click', () => this.promptNewSlide());
     document.getElementById('menu-toggle-edit')?.addEventListener('click', () => this.toggleEditMode());
     document.getElementById('menu-save-slide')?.addEventListener('click', () => this.saveSlideHtml());
+    document.getElementById('menu-trans-fade')?.addEventListener('click', () => this.setDeckTransition('fade'));
+    document.getElementById('menu-trans-slide')?.addEventListener('click', () => this.setDeckTransition('slide-left'));
+    document.getElementById('menu-trans-zoom')?.addEventListener('click', () => this.setDeckTransition('zoom'));
+    document.getElementById('menu-trans-none')?.addEventListener('click', () => this.setDeckTransition('none'));
     document.getElementById('menu-reload-slide')!.addEventListener('click', () => this.reloadCurrentSlide());
     document.getElementById('menu-help-shortcuts')!.addEventListener('click', () => this.toggleShortcuts(true));
 
@@ -594,49 +611,164 @@ class PresentationApp {
     });
   }
 
-  goToSlide(index: number): void {
+  setDeckTransition(trans: 'fade' | 'slide-left' | 'zoom' | 'none'): void {
+    this.currentTransitionOverride = trans;
+    if (this.manifest) {
+      this.manifest.defaultTransition = trans;
+    }
+  }
+
+  goToSlide(index: number, forceInstant: boolean = false): void {
     if (!this.manifest || this.manifest.slides.length === 0) return;
     if (index < 0) index = 0;
     if (index >= this.manifest.slides.length) index = this.manifest.slides.length - 1;
 
+    const previousIndex = this.currentIndex;
     this.currentIndex = index;
     const currentSlide = this.manifest.slides[this.currentIndex];
+    const isForward = index >= previousIndex;
 
     // Update Counter
     const total = this.manifest.slides.length;
     this.slideCounterEl.textContent = `${this.currentIndex + 1} / ${total}`;
     this.floatCounterEl.textContent = `${this.currentIndex + 1} / ${total}`;
 
-    // Update Iframe Source
-    const slideUrl = `neopres://deck/${currentSlide.path}`;
-    console.log(`[NeoDeck] goToSlide(${index}): Loading ${slideUrl}`);
-    this.slideFrameEl.src = slideUrl;
-
-    this.slideFrameEl.onload = () => {
-      console.log(`[NeoDeck] Slide iframe onload event fired.`);
-      let doc: Document | null = null;
-      try {
-        doc = this.slideFrameEl.contentDocument;
-        console.log(`[NeoDeck] contentDocument access:`, !!doc, `(doc title: "${doc?.title}")`);
-      } catch (err: any) {
-        console.error(`[NeoDeck] Security/DOM error accessing contentDocument:`, err.message);
-      }
-      if (doc) {
-        this.setupIframeKeyDownBridge(doc);
-        if (this.isEditMode && !this.isPresentationMode) {
-          this.enableEditModeFeatures();
-        }
-      }
-    };
-
-    // Update Sidebar Selection & Notes
+    // Update Sidebar Selection & Notes immediately
     this.updateSidebarSelection();
     this.notesEditorEl.value = currentSlide.notes || '';
 
     // Synchronize to Presenter View
     this.syncPresenterState();
 
-    // Trigger Scaler adjustment
+    const slideUrl = `neopres://deck/${currentSlide.path}`;
+    const seq = ++this.navSequence;
+
+    // Determine transition type
+    const isInitial = !this.slideFrameEl.src || this.slideFrameEl.src === 'about:blank' || this.slideFrameEl.src === '';
+    const transitionType = (forceInstant || isInitial)
+      ? 'none'
+      : (this.currentTransitionOverride || currentSlide.transition || this.manifest.defaultTransition || 'fade');
+
+    console.log(`[NeoDeck] goToSlide(${index}): Loading ${slideUrl} (transition: ${transitionType})`);
+
+    if (transitionType === 'none') {
+      const activeFrame = this.slideFrameEl;
+      activeFrame.style.transition = 'none';
+      activeFrame.style.opacity = '1';
+      activeFrame.style.transform = 'none';
+      activeFrame.style.zIndex = '2';
+      activeFrame.style.pointerEvents = 'auto';
+      activeFrame.classList.add('slide-frame-active');
+      activeFrame.classList.remove('slide-frame-idle');
+
+      const idleFrame = this.idleFrameEl;
+      idleFrame.style.transition = 'none';
+      idleFrame.style.opacity = '0';
+      idleFrame.style.zIndex = '1';
+      idleFrame.style.pointerEvents = 'none';
+      idleFrame.classList.remove('slide-frame-active');
+      idleFrame.classList.add('slide-frame-idle');
+
+      activeFrame.src = slideUrl;
+      activeFrame.onload = () => {
+        if (this.navSequence !== seq) return;
+        const doc = activeFrame.contentDocument;
+        if (doc) {
+          this.setupIframeKeyDownBridge(doc);
+          if (this.isEditMode && !this.isPresentationMode) {
+            this.enableEditModeFeatures();
+          }
+        }
+      };
+      window.dispatchEvent(new Event('resize'));
+      return;
+    }
+
+    // Double-buffered smooth transition
+    const currentActiveFrame = this.slideFrameEl;
+    const incomingFrame = this.idleFrameEl;
+
+    // Remove edit overlays from outgoing frame to prevent ghosting
+    this.disableEditModeFeatures();
+
+    // Prepare incoming frame positioning before load
+    incomingFrame.style.transition = 'none';
+    if (transitionType === 'slide-left' || transitionType === 'slide') {
+      incomingFrame.style.transform = isForward ? 'translate3d(100%, 0, 0)' : 'translate3d(-100%, 0, 0)';
+      incomingFrame.style.opacity = '1';
+    } else if (transitionType === 'zoom') {
+      incomingFrame.style.transform = 'scale(1.06)';
+      incomingFrame.style.opacity = '0';
+    } else {
+      // Default: 'fade'
+      incomingFrame.style.transform = 'scale(1)';
+      incomingFrame.style.opacity = '0';
+    }
+    incomingFrame.style.zIndex = '2';
+    incomingFrame.style.pointerEvents = 'none';
+
+    incomingFrame.src = slideUrl;
+
+    incomingFrame.onload = () => {
+      if (this.navSequence !== seq) return;
+
+      // Force browser reflow to register initial position
+      void incomingFrame.offsetHeight;
+
+      // Apply smooth transition
+      const duration = '0.35s';
+      const easing = 'cubic-bezier(0.25, 1, 0.5, 1)';
+      incomingFrame.style.transition = `opacity ${duration} ${easing}, transform ${duration} ${easing}`;
+      currentActiveFrame.style.transition = `opacity ${duration} ${easing}, transform ${duration} ${easing}`;
+
+      // Animate incoming to active
+      incomingFrame.style.opacity = '1';
+      incomingFrame.style.transform = 'translate3d(0, 0, 0) scale(1)';
+      incomingFrame.style.pointerEvents = 'auto';
+      incomingFrame.classList.add('slide-frame-active');
+      incomingFrame.classList.remove('slide-frame-idle');
+
+      // Animate current outgoing frame
+      currentActiveFrame.style.pointerEvents = 'none';
+      currentActiveFrame.style.zIndex = '1';
+      if (transitionType === 'slide-left' || transitionType === 'slide') {
+        currentActiveFrame.style.transform = isForward ? 'translate3d(-100%, 0, 0)' : 'translate3d(100%, 0, 0)';
+        currentActiveFrame.style.opacity = '1';
+      } else if (transitionType === 'zoom') {
+        currentActiveFrame.style.transform = 'scale(0.94)';
+        currentActiveFrame.style.opacity = '0';
+      } else {
+        // Fade
+        currentActiveFrame.style.opacity = '0';
+      }
+      currentActiveFrame.classList.remove('slide-frame-active');
+      currentActiveFrame.classList.add('slide-frame-idle');
+
+      // Swap active buffer index
+      this.activeFrameIndex = this.activeFrameIndex === 0 ? 1 : 0;
+
+      // Setup DOM bridge & edit mode on the new active frame
+      const doc = incomingFrame.contentDocument;
+      if (doc) {
+        this.setupIframeKeyDownBridge(doc);
+        if (this.isEditMode && !this.isPresentationMode) {
+          this.enableEditModeFeatures();
+        }
+      }
+
+      // Cleanup idle frame after transition ends
+      if (this.transitionTimer) clearTimeout(this.transitionTimer);
+      this.transitionTimer = setTimeout(() => {
+        try {
+          const oldDoc = currentActiveFrame.contentDocument;
+          if (oldDoc) {
+            oldDoc.querySelectorAll('audio, video').forEach(m => (m as HTMLMediaElement).pause());
+          }
+        } catch (_) {}
+        currentActiveFrame.style.transform = 'none';
+      }, 380);
+    };
+
     window.dispatchEvent(new Event('resize'));
   }
 
