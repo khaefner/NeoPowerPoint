@@ -8,7 +8,7 @@ class PresentationApp {
   private manifest: DeckManifest | null = null;
   private currentIndex: number = 0;
   private isPresentationMode: boolean = false;
-  private isEditMode: boolean = false;
+  private isEditMode: boolean = true;
   private currentScaleFactor: number = 1;
   private floatingControlsTimer: any = null;
 
@@ -481,6 +481,12 @@ class PresentationApp {
     this.emptyStateEl.classList.add('hidden');
     this.slideWrapperEl.classList.remove('hidden');
 
+    this.isEditMode = true;
+    this.editorToolbarEl?.classList.remove('hidden');
+    document.getElementById('btn-save-slide')?.classList.remove('hidden');
+    const labelToggle = document.getElementById('label-toggle-edit');
+    if (labelToggle) labelToggle.textContent = 'Test Scripts';
+
     this.renderSidebarSlides();
     this.goToSlide(0);
   }
@@ -617,7 +623,7 @@ class PresentationApp {
       }
       if (doc) {
         this.setupIframeKeyDownBridge(doc);
-        if (this.isEditMode) {
+        if (this.isEditMode && !this.isPresentationMode) {
           this.enableEditModeFeatures();
         }
       }
@@ -722,6 +728,17 @@ class PresentationApp {
     this.isPresentationMode = !this.isPresentationMode;
     document.body.classList.toggle('mode-presentation', this.isPresentationMode);
     this.floatingControlsEl.classList.toggle('hidden', !this.isPresentationMode);
+
+    if (this.isPresentationMode) {
+      this.disableEditModeFeatures();
+      this.editorToolbarEl?.classList.add('hidden');
+    } else {
+      if (this.isEditMode) {
+        this.editorToolbarEl?.classList.remove('hidden');
+        this.enableEditModeFeatures();
+      }
+    }
+
     window.electronAPI.setWindowedPresentation(this.isPresentationMode);
     window.dispatchEvent(new Event('resize'));
   }
@@ -731,6 +748,17 @@ class PresentationApp {
     this.isPresentationMode = isFs;
     document.body.classList.toggle('mode-presentation', isFs);
     this.floatingControlsEl.classList.toggle('hidden', !isFs);
+
+    if (this.isPresentationMode) {
+      this.disableEditModeFeatures();
+      this.editorToolbarEl?.classList.add('hidden');
+    } else {
+      if (this.isEditMode) {
+        this.editorToolbarEl?.classList.remove('hidden');
+        this.enableEditModeFeatures();
+      }
+    }
+
     window.dispatchEvent(new Event('resize'));
   }
 
@@ -739,6 +767,12 @@ class PresentationApp {
     document.body.classList.remove('mode-presentation');
     this.floatingControlsEl.classList.add('hidden');
     window.electronAPI.setWindowedPresentation(false);
+
+    if (this.isEditMode) {
+      this.editorToolbarEl?.classList.remove('hidden');
+      this.enableEditModeFeatures();
+    }
+
     window.dispatchEvent(new Event('resize'));
   }
 
@@ -953,23 +987,28 @@ class PresentationApp {
     this.isEditMode = !this.isEditMode;
     console.log(`[NeoEditor] toggleEditMode -> isEditMode is now: ${this.isEditMode}`);
     const btnToggle = document.getElementById('btn-toggle-edit-mode');
+    const labelToggle = document.getElementById('label-toggle-edit');
     const btnSave = document.getElementById('btn-save-slide');
 
     if (this.isEditMode) {
       this.editorToolbarEl?.classList.remove('hidden');
-      btnToggle?.classList.add('active');
+      if (labelToggle) labelToggle.textContent = 'Test Scripts';
       if (btnToggle) {
-        btnToggle.style.backgroundColor = 'var(--accent-primary)';
-        btnToggle.style.color = '#fff';
+        btnToggle.title = 'Switch to Interactive Script Test Mode (Ctrl+E)';
+        btnToggle.classList.remove('active');
+        btnToggle.style.backgroundColor = '';
+        btnToggle.style.color = '';
       }
       btnSave?.classList.remove('hidden');
       this.enableEditModeFeatures();
     } else {
       this.editorToolbarEl?.classList.add('hidden');
-      btnToggle?.classList.remove('active');
+      if (labelToggle) labelToggle.textContent = 'Edit Slide';
       if (btnToggle) {
-        btnToggle.style.backgroundColor = '';
-        btnToggle.style.color = '';
+        btnToggle.title = 'Switch to Slide Authoring / Edit Mode (Ctrl+E)';
+        btnToggle.classList.add('active');
+        btnToggle.style.backgroundColor = 'var(--accent-primary)';
+        btnToggle.style.color = '#fff';
       }
       btnSave?.classList.add('hidden');
       this.disableEditModeFeatures();
@@ -1535,12 +1574,15 @@ class PresentationApp {
 
     if (success) {
       this.flashLiveBadge(); // Provide visual feedback for save
-      // Ensure the thumbnail is updated after saving
-      this.reloadCurrentSlide();
-      // Automatically exit edit mode after saving
-      if (this.isEditMode) {
-        this.toggleEditMode();
+      // Ensure the thumbnail in sidebar is updated after saving
+      const currentItem = this.slidesListEl.children[this.currentIndex];
+      if (currentItem) {
+        const frame = currentItem.querySelector('.slide-item-preview-frame') as HTMLIFrameElement;
+        if (frame) {
+          frame.src = `neopres://deck/${currentSlide.path}?t=${Date.now()}`;
+        }
       }
+      this.syncPresenterState();
     }
   }
 

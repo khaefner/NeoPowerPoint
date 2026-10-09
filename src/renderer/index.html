@@ -35,14 +35,14 @@
       </div>
 
       <div class="toolbar-right">
-        <button id="btn-toggle-edit-mode" class="btn btn-secondary" title="Edit Slide (Ctrl+E)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          Edit Slide
-        </button>
-
-        <button id="btn-save-slide" class="btn btn-primary hidden" title="Save Slide Changes (Ctrl+S)">
+        <button id="btn-save-slide" class="btn btn-primary" title="Save Slide Changes (Ctrl+S)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
           Save Slide
+        </button>
+
+        <button id="btn-toggle-edit-mode" class="btn btn-secondary" title="Toggle Interactive Script Test Mode (Ctrl+E)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span id="label-toggle-edit">Test Scripts</span>
         </button>
 
         <button id="btn-overview-grid" class="btn btn-secondary" title="Slide Sorter (O)">
@@ -153,10 +153,10 @@
 
       <div class="editor-toolbar-spacer"></div>
 
-      <!-- Save and Exit Actions inside editor bar -->
+      <!-- Save and Script Test Actions inside editor bar -->
       <div class="editor-toolbar-group">
-        <button id="btn-editor-done" class="btn btn-sm btn-secondary" title="Done Editing (Esc / Ctrl+E)">Done</button>
-        <button id="btn-editor-save" class="btn btn-sm btn-primary" title="Save & Exit (Ctrl+S)">💾 Save Slide</button>
+        <button id="btn-editor-done" class="btn btn-sm btn-secondary" title="Test Interactive Slide Scripts (Ctrl+E)">Test Scripts</button>
+        <button id="btn-editor-save" class="btn btn-sm btn-primary" title="Save Changes (Ctrl+S)">💾 Save Slide</button>
       </div>
     </div>
 
