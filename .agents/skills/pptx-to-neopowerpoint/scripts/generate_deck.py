@@ -151,7 +151,7 @@ def format_bullet_str(bullet_raw, auto_idx=1):
         return f'{chr(ord("A") + (auto_idx - 1) % 26)})'
     return f'{auto_idx}.'
 
-def render_paragraph(p, slide_num, font_scale=1.0, p_idx=None, para_anim=None, auto_idx=1):
+def render_paragraph(p, slide_num, font_scale=1.0, p_idx=None, para_anim=None, auto_idx=1, empty_sz_override=None):
     p_styles = []
     p_classes = []
     anim_attrs = ''
@@ -198,10 +198,10 @@ def render_paragraph(p, slide_num, font_scale=1.0, p_idx=None, para_anim=None, a
     class_attr = f' class="{" ".join(p_classes)}"' if p_classes else ''
 
     if p.get('empty') or not runs_html.strip():
-        empty_sz = p.get('style', {}).get('size_px') or 24.0
-        p_styles.append(f'min-height: {(empty_sz * font_scale):.1f}px;')
+        empty_sz = empty_sz_override if empty_sz_override is not None else ((p.get('style', {}).get('size_px') or 24.0) * font_scale)
+        p_styles.append(f'min-height: {empty_sz:.1f}px;')
         style_attr = f' style="{" ".join(p_styles)}"' if p_styles else ''
-        return f'<p{class_attr}{style_attr}{anim_attrs}><span style="font-size: {(empty_sz * font_scale):.1f}px;">&nbsp;</span></p>'
+        return f'<p{class_attr}{style_attr}{anim_attrs}><span style="font-size: {empty_sz:.1f}px;">&nbsp;</span></p>'
 
     bullet = p.get('bullet')
     mar_l = p.get('marL', 0)
@@ -452,18 +452,20 @@ def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
         tail = line.get('tail') if line else None
 
         mk_id_base = f"m_{slide_num}_{spid or int(x)}"
-        if head in ('triangle', 'arrow', 'stealth'):
-            head_id = f"{mk_id_base}_head"
-            defs_list.append(f'''<marker id="{head_id}" markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto-start-reverse">
-  <path d="M 0 1 L 8 4 L 0 7 z" fill="{line_col}"/>
-</marker>''')
-            path_attrs.append(f'marker-end="url(#{head_id})"')
+        # Note: In OOXML <a:ln>, <a:headEnd> is the START of the connector/path,
+        # and <a:tailEnd> is the END of the connector/path.
         if tail in ('triangle', 'arrow', 'stealth'):
             tail_id = f"{mk_id_base}_tail"
-            defs_list.append(f'''<marker id="{tail_id}" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+            defs_list.append(f'''<marker id="{tail_id}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+  <path d="M 0 1 L 8 4 L 0 7 z" fill="{line_col}"/>
+</marker>''')
+            path_attrs.append(f'marker-end="url(#{tail_id})"')
+        if head in ('triangle', 'arrow', 'stealth'):
+            head_id = f"{mk_id_base}_head"
+            defs_list.append(f'''<marker id="{head_id}" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto-start-reverse">
   <path d="M 8 1 L 0 4 L 8 7 z" fill="{line_col}"/>
 </marker>''')
-            path_attrs.append(f'marker-start="url(#{tail_id})"')
+            path_attrs.append(f'marker-start="url(#{head_id})"')
 
         defs_html = f"<defs>\n{''.join(defs_list)}\n</defs>\n" if defs_list else ""
         extra_p_attr = (" " + " ".join(path_attrs)) if path_attrs else ""
@@ -557,6 +559,18 @@ def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
         while raw_paras and (raw_paras[-1].get('empty') or not any(r.get('text', '').strip() for r in raw_paras[-1].get('runs', []))):
             raw_paras = raw_paras[:-1]
 
+        # In table-like text columns with empty spacer paragraphs between rows,
+        # calculate spacer height to distribute lines across the box height accurately
+        empty_indices = [i for i, p in enumerate(raw_paras) if p.get('empty') or not any(r.get('text', '').strip() for r in p.get('runs', []))]
+        non_empty_paras = [p for i, p in enumerate(raw_paras) if i not in empty_indices]
+        calculated_empty_ht = None
+        if empty_indices and len(empty_indices) >= 2 and h > 100:
+            est_text_ht = sum((p.get('style', {}).get('size_px') or 24.0) * font_scale * 1.2 for p in non_empty_paras)
+            margin_ht = sum((p.get('space_before', {}).get('px', 0) + p.get('space_after', {}).get('px', 0)) for p in raw_paras)
+            avail_h = h - (pt + pb) - est_text_ht - margin_ht
+            if avail_h > len(empty_indices) * 20.0:
+                calculated_empty_ht = avail_h / len(empty_indices)
+
         auto_counters = {}
         for p_idx, p in enumerate(raw_paras):
             b = p.get('bullet', '')
@@ -567,7 +581,8 @@ def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
                 auto_idx = auto_counters[b_key]
 
             p_anim = para_anims.get((spid, p_idx))
-            rendered_p = render_paragraph(p, slide_num, font_scale, p_idx, p_anim, auto_idx)
+            custom_empty_sz = calculated_empty_ht if (p_idx in empty_indices and calculated_empty_ht) else None
+            rendered_p = render_paragraph(p, slide_num, font_scale, p_idx, p_anim, auto_idx, empty_sz_override=custom_empty_sz)
             if rendered_p:
                 p_list.append(rendered_p)
 

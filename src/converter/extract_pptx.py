@@ -77,17 +77,46 @@ class Pkg:
 
 
 def extract_metafile_image(data):
-    """Extract embedded raster image (JPEG or PNG) from an EMF/WMF binary."""
+    """Extract embedded vector or raster image (PDF via mutool, PNG, or JPEG) from an EMF/WMF binary."""
+    # 1. Check for embedded PDF (common in Mac PowerPoint exports, e.g. fig42_table.pdf)
+    pdf_start = data.find(b'%PDF')
+    if pdf_start != -1:
+        pdf_end = data.rfind(b'%%EOF')
+        if pdf_end != -1 and pdf_end > pdf_start:
+            pdf_bytes = data[pdf_start:pdf_end + 5]
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tf:
+                tf.write(pdf_bytes)
+                tf_path = tf.name
+            out_png = tf_path + '.png'
+            try:
+                subprocess.run(['mutool', 'draw', '-r', '300', '-o', out_png, tf_path],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                if os.path.exists(out_png):
+                    with open(out_png, 'rb') as f:
+                        png_bytes = f.read()
+                    os.unlink(out_png)
+                    os.unlink(tf_path)
+                    return png_bytes, '.png'
+            except Exception:
+                pass
+            if os.path.exists(tf_path):
+                os.unlink(tf_path)
+
+    # 2. Check for embedded PNG
+    png_start = data.find(b'\x89PNG\r\n\x1a\n')
+    if png_start != -1:
+        png_end = data.find(b'IEND', png_start)
+        if png_end != -1 and png_end > png_start:
+            return data[png_start:png_end + 8], '.png'
+
+    # 3. Check for embedded JPEG
     jpg_start = data.find(b'\xff\xd8\xff')
     if jpg_start != -1:
         jpg_end = data.rfind(b'\xff\xd9')
         if jpg_end != -1 and jpg_end > jpg_start:
             return data[jpg_start:jpg_end + 2], '.jpg'
-    png_start = data.find(b'\x89PNG\r\n\x1a\n')
-    if png_start != -1:
-        png_end = data.rfind(b'IEND')
-        if png_end != -1 and png_end > png_start:
-            return data[png_start:png_end + 8], '.png'
+
     return None, None
 
 

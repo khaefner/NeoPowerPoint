@@ -144,6 +144,25 @@ async function runTests() {
       throw new Error('Slide 6 missing custom SVG arrow and markers');
     }
     console.log('✓ Validated slide 6 renders custom geometry arrow with SVG path and markers');
+
+    // Slide 8 arrow validation (tailEnd -> marker-end pointing towards router)
+    const slide8 = manifest.slides[7];
+    const s8Html = await fs.promises.readFile(path.join(convertedDeckDir, slide8.path), 'utf-8');
+    if (!s8Html.includes('marker-end="url(#m_8_46_tail)"')) {
+      throw new Error('Slide 8 arrow is pointing backwards (missing marker-end for tailEnd)');
+    }
+    console.log('✓ Validated slide 8 curved arrow points forward to destination');
+
+    // Slide 9 arrow and table image validation
+    const slide9 = manifest.slides[8];
+    const s9Html = await fs.promises.readFile(path.join(convertedDeckDir, slide9.path), 'utf-8');
+    if (!s9Html.includes('marker-end="url(#m_9_458_tail)"')) {
+      throw new Error('Slide 9 arrow is pointing backwards (missing marker-end for tailEnd)');
+    }
+    if (!s9Html.includes('image30.png')) {
+      throw new Error('Slide 9 missing rendered local forwarding table image (image30.png)');
+    }
+    console.log('✓ Validated slide 9 renders forward pointing arrow and local forwarding table image (image30.png)');
   }
 
   console.log('\n🎉 ALL PPTX ANIMATION TESTS PASSED SUCCESSFULLY!');
