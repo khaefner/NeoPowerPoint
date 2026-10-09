@@ -139,9 +139,13 @@ window.presenterAPI.onSyncState((state) => {
 function renderState(state: any) {
   if (!state || !state.manifest) return;
 
-  const { manifest, currentIndex, totalSlides } = state;
+  const { manifest, currentIndex, totalSlides, currentAnimStep, totalAnimSteps } = state;
   deckTitleEl.textContent = manifest.title || 'Untitled Presentation';
-  slideCounterEl.textContent = `Slide ${currentIndex + 1} of ${totalSlides}`;
+  if (totalAnimSteps && totalAnimSteps > 0) {
+    slideCounterEl.textContent = `Slide ${currentIndex + 1} of ${totalSlides} (Step ${currentAnimStep || 0}/${totalAnimSteps})`;
+  } else {
+    slideCounterEl.textContent = `Slide ${currentIndex + 1} of ${totalSlides}`;
+  }
 
   const currentSlide = manifest.slides[currentIndex];
   const nextSlide = manifest.slides[currentIndex + 1] || null;
@@ -152,6 +156,27 @@ function renderState(state: any) {
     const curUrl = `neopres://deck/${currentSlide.path}?view=presenter_cur`;
     if (currentFrameEl.src !== curUrl) {
       currentFrameEl.src = curUrl;
+      currentFrameEl.onload = () => {
+        try {
+          if (typeof currentAnimStep === 'number') {
+            currentFrameEl.contentWindow?.postMessage({
+              type: 'NEODECK_SET_STEP',
+              step: currentAnimStep,
+              animate: false
+            }, '*');
+          }
+        } catch (_) {}
+      };
+    } else {
+      try {
+        if (typeof currentAnimStep === 'number') {
+          currentFrameEl.contentWindow?.postMessage({
+            type: 'NEODECK_SET_STEP',
+            step: currentAnimStep,
+            animate: true
+          }, '*');
+        }
+      } catch (_) {}
     }
     // Speaker Notes
     if (currentSlide.notes && currentSlide.notes.trim()) {
@@ -170,6 +195,11 @@ function renderState(state: any) {
     const nextUrl = `neopres://deck/${nextSlide.path}?view=presenter_next`;
     if (nextFrameEl.src !== nextUrl) {
       nextFrameEl.src = nextUrl;
+      nextFrameEl.onload = () => {
+        try {
+          nextFrameEl.contentDocument?.body.classList.add('show-all-anims');
+        } catch (_) {}
+      };
     }
   } else {
     nextSlideNameEl.textContent = 'End of Presentation';

@@ -11,6 +11,8 @@ class PresentationApp {
   private isEditMode: boolean = true;
   private currentScaleFactor: number = 1;
   private floatingControlsTimer: any = null;
+  private currentAnimStep: number = 0;
+  private totalAnimSteps: number = 0;
 
   // DOM Elements
   private emptyStateEl = document.getElementById('empty-state')!;
@@ -355,6 +357,10 @@ class PresentationApp {
         this.goToSlide(event.data.index);
       } else if (event.data.type === 'NEODECK_TOGGLE_PRESENT') {
         this.toggleWindowedPresentation();
+      } else if (event.data.type === 'NEODECK_STEP_CHANGED') {
+        this.currentAnimStep = event.data.currentStep || 0;
+        this.totalAnimSteps = event.data.totalSteps || 0;
+        this.syncPresenterState();
       }
     });
   }
@@ -592,6 +598,7 @@ class PresentationApp {
           try {
             const doc = frame.contentDocument;
             if (doc) {
+              doc.body?.classList.add('show-all-anims');
               doc.querySelectorAll('audio, video').forEach((media) => {
                 (media as HTMLMediaElement).muted = true;
               });
@@ -663,7 +670,7 @@ class PresentationApp {
     }
   }
 
-  goToSlide(index: number, forceInstant: boolean = false): void {
+  goToSlide(index: number, forceInstant: boolean = false, fromPrev: boolean = false): void {
     if (!this.manifest || this.manifest.slides.length === 0) return;
     if (index < 0) index = 0;
     if (index >= this.manifest.slides.length) index = this.manifest.slides.length - 1;
@@ -672,6 +679,9 @@ class PresentationApp {
     this.currentIndex = index;
     const currentSlide = this.manifest.slides[this.currentIndex];
     const isForward = index >= previousIndex;
+
+    this.currentAnimStep = 0;
+    this.totalAnimSteps = 0;
 
     // Update Counter
     const total = this.manifest.slides.length;
@@ -726,6 +736,16 @@ class PresentationApp {
           this.setupIframeKeyDownBridge(doc);
           if (this.isEditMode && !this.isPresentationMode) {
             this.enableEditModeFeatures();
+          } else if (fromPrev) {
+            try {
+              const win = activeFrame.contentWindow as any;
+              if (win && typeof win.goToAnimStep === 'function') {
+                const state = win.getAnimState?.();
+                if (state && state.totalSteps > 0) {
+                  win.goToAnimStep(state.totalSteps, false);
+                }
+              }
+            } catch (_) {}
           }
         }
       };
@@ -802,6 +822,16 @@ class PresentationApp {
         this.setupIframeKeyDownBridge(doc);
         if (this.isEditMode && !this.isPresentationMode) {
           this.enableEditModeFeatures();
+        } else if (fromPrev) {
+          try {
+            const win = incomingFrame.contentWindow as any;
+            if (win && typeof win.goToAnimStep === 'function') {
+              const state = win.getAnimState?.();
+              if (state && state.totalSteps > 0) {
+                win.goToAnimStep(state.totalSteps, false);
+              }
+            }
+          } catch (_) {}
         }
       }
 
@@ -822,14 +852,40 @@ class PresentationApp {
   }
 
   nextSlide(): void {
-    if (this.manifest && this.currentIndex < this.manifest.slides.length - 1) {
+    if (!this.manifest) return;
+    if (!this.isEditMode || this.isPresentationMode) {
+      try {
+        const win = this.slideFrameEl.contentWindow as any;
+        if (win && typeof win.nextAnimStep === 'function') {
+          const advanced = win.nextAnimStep();
+          if (advanced) {
+            return;
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (this.currentIndex < this.manifest.slides.length - 1) {
       this.goToSlide(this.currentIndex + 1);
     }
   }
 
   prevSlide(): void {
+    if (!this.manifest) return;
+    if (!this.isEditMode || this.isPresentationMode) {
+      try {
+        const win = this.slideFrameEl.contentWindow as any;
+        if (win && typeof win.prevAnimStep === 'function') {
+          const rewound = win.prevAnimStep();
+          if (rewound) {
+            return;
+          }
+        }
+      } catch (_) {}
+    }
+
     if (this.currentIndex > 0) {
-      this.goToSlide(this.currentIndex - 1);
+      this.goToSlide(this.currentIndex - 1, false, true);
     }
   }
 
@@ -1156,6 +1212,7 @@ class PresentationApp {
           try {
             const doc = frame.contentDocument;
             if (doc) {
+              doc.body?.classList.add('show-all-anims');
               doc.querySelectorAll('audio, video').forEach((media) => {
                 (media as HTMLMediaElement).muted = true;
               });
@@ -1331,6 +1388,7 @@ class PresentationApp {
     }
 
     console.log(`[NeoEditor] enableEditModeFeatures: Applying to document "${doc.title}"...`);
+    doc.body?.classList.add('show-all-anims', 'edit-mode');
 
     // Make text elements contenteditable
     const textElements = doc.querySelectorAll(
@@ -1665,6 +1723,8 @@ class PresentationApp {
     const doc = this.slideFrameEl.contentDocument;
     if (!doc) return;
 
+    doc.body?.classList.remove('show-all-anims', 'edit-mode');
+
     const overlay = doc.getElementById('neo-selection-overlay');
     if (overlay) overlay.remove();
 
@@ -1894,7 +1954,9 @@ class PresentationApp {
     window.electronAPI.syncStateToPresenter({
       manifest: this.manifest,
       currentIndex: this.currentIndex,
-      totalSlides: this.manifest.slides.length
+      totalSlides: this.manifest.slides.length,
+      currentAnimStep: this.currentAnimStep,
+      totalAnimSteps: this.totalAnimSteps
     });
   }
 

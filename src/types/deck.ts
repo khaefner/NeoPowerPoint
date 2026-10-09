@@ -6,6 +6,8 @@ export interface SlideMetadata {
   durationSec?: number;   // Recommended duration (in seconds)
   autoAdvanceSec?: number;// Optional auto-advance timer (0 or undefined for manual)
   transition?: 'none' | 'fade' | 'slide-left' | 'zoom';
+  hasAnimations?: boolean;
+  animationSteps?: number;
 }
 
 export interface DeckManifest {
