@@ -110,8 +110,66 @@ def render_run(run, slide_num, font_scale=1.0):
         return f'<a href="{href}" target="_blank" rel="noopener"{style_attr}>{escaped}</a>'
     return f'<span{style_attr}>{escaped}</span>'
 
-def render_paragraph(p, slide_num, font_scale=1.0):
+def to_roman(num):
+    val = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+    syb = ["m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i"]
+    res = ""
+    i = 0
+    n = max(1, num)
+    while n > 0 and i < len(val):
+        for _ in range(n // val[i]):
+            res += syb[i]
+            n -= val[i]
+        i += 1
+    return res
+
+def format_bullet_str(bullet_raw, auto_idx=1):
+    if not bullet_raw:
+        return ''
+    if not bullet_raw.startswith('auto:'):
+        return bullet_raw
+    btype = bullet_raw[5:]
+    if btype == 'romanLcPeriod':
+        return f'{to_roman(auto_idx)}.'
+    elif btype == 'romanUcPeriod':
+        return f'{to_roman(auto_idx).upper()}.'
+    elif btype == 'romanLcParenR':
+        return f'{to_roman(auto_idx)})'
+    elif btype == 'romanUcParenR':
+        return f'{to_roman(auto_idx).upper()})'
+    elif btype == 'arabicPeriod':
+        return f'{auto_idx}.'
+    elif btype == 'arabicParenR':
+        return f'{auto_idx})'
+    elif btype == 'alphaLcPeriod':
+        return f'{chr(ord("a") + (auto_idx - 1) % 26)}.'
+    elif btype == 'alphaUcPeriod':
+        return f'{chr(ord("A") + (auto_idx - 1) % 26)}.'
+    elif btype == 'alphaLcParenR':
+        return f'{chr(ord("a") + (auto_idx - 1) % 26)})'
+    elif btype == 'alphaUcParenR':
+        return f'{chr(ord("A") + (auto_idx - 1) % 26)})'
+    return f'{auto_idx}.'
+
+def render_paragraph(p, slide_num, font_scale=1.0, p_idx=None, para_anim=None, auto_idx=1):
     p_styles = []
+    p_classes = []
+    anim_attrs = ''
+
+    if para_anim:
+        st_num = para_anim['step']
+        eff_name = para_anim['effect']
+        eff_type = para_anim['type']
+        p_classes.append('neo-anim-target')
+        p_classes.append(f'neo-anim-step-{st_num}')
+        p_classes.append(f'neo-anim-{eff_name}')
+        p_classes.append('anim-hidden')
+        anim_attrs = f' data-anim-step="{st_num}" data-anim-type="{eff_type}" data-anim-effect="{eff_name}"'
+        if p_idx is not None:
+            anim_attrs += f' data-para-idx="{p_idx}"'
+    elif p_idx is not None:
+        anim_attrs = f' data-para-idx="{p_idx}"'
+
     algn = p.get('algn', 'l')
     if algn == 'ctr':
         p_styles.append('text-align: center;')
@@ -137,14 +195,21 @@ def render_paragraph(p, slide_num, font_scale=1.0):
         p_styles.append(f'margin-bottom: {p["space_after"]["px"]:.1f}px;')
 
     runs_html = ''.join(render_run(r, slide_num, font_scale) for r in p.get('runs', []))
-    if not runs_html.strip():
-        return ''
+    class_attr = f' class="{" ".join(p_classes)}"' if p_classes else ''
+
+    if p.get('empty') or not runs_html.strip():
+        empty_sz = p.get('style', {}).get('size_px') or 24.0
+        p_styles.append(f'min-height: {(empty_sz * font_scale):.1f}px;')
+        style_attr = f' style="{" ".join(p_styles)}"' if p_styles else ''
+        return f'<p{class_attr}{style_attr}{anim_attrs}><span style="font-size: {(empty_sz * font_scale):.1f}px;">&nbsp;</span></p>'
+
     bullet = p.get('bullet')
     mar_l = p.get('marL', 0)
     indent = p.get('indent', 0)
 
     if bullet:
-        bullet_char = html.escape(bullet)
+        bullet_text = format_bullet_str(bullet, auto_idx)
+        bullet_char = html.escape(bullet_text)
         indent_val = max(24.0, abs(indent) if indent else 32.0)
         p_styles.append(f'position: relative; padding-left: {mar_l:.1f}px;')
         style_attr = f' style="{" ".join(p_styles)}"' if p_styles else ''
@@ -152,20 +217,33 @@ def render_paragraph(p, slide_num, font_scale=1.0):
         bullet_sz = first_run.get('size_px', 24.0) * font_scale
         bullet_col = first_run.get('color', 'inherit')
         bullet_span = f'<span style="position: absolute; left: {(mar_l - indent_val):.1f}px; font-size: {bullet_sz:.1f}px; color: {bullet_col}; line-height: inherit; user-select: none;">{bullet_char}</span>'
-        return f'<p{style_attr}>{bullet_span}{runs_html}</p>'
+        return f'<p{class_attr}{style_attr}{anim_attrs}>{bullet_span}{runs_html}</p>'
     else:
         if mar_l > 0:
             p_styles.append(f'padding-left: {mar_l:.1f}px;')
         style_attr = f' style="{" ".join(p_styles)}"' if p_styles else ''
-        return f'<p{style_attr}>{runs_html}</p>'
+        return f'<p{class_attr}{style_attr}{anim_attrs}>{runs_html}</p>'
 
-def render_table(sh, slide_num):
+def render_table(sh, slide_num, shape_anim=None):
     tbl = sh.get('table', {})
     cols = tbl.get('column_widths_px', [])
     rows = tbl.get('rows', [])
     x, y, w, h = sh.get('x', 0), sh.get('y', 0), sh.get('w', 0), sh.get('h', 0)
+    spid = str(sh.get('id') or sh.get('spid') or '')
 
-    html_out = [f'<table class="slide-table" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;">']
+    tbl_classes = ['slide-table']
+    anim_attrs = ''
+    if shape_anim:
+        st_num = shape_anim['step']
+        eff_name = shape_anim['effect']
+        eff_type = shape_anim['type']
+        tbl_classes.extend(['neo-anim-target', f'neo-anim-step-{st_num}', f'neo-anim-{eff_name}', 'anim-hidden'])
+        anim_attrs = f' data-anim-step="{st_num}" data-anim-type="{eff_type}" data-anim-effect="{eff_name}"'
+    if spid:
+        anim_attrs += f' data-spid="{spid}"'
+
+    class_str = ' '.join(tbl_classes)
+    html_out = [f'<table class="{class_str}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;"{anim_attrs}>']
     html_out.append('  <colgroup>')
     for cw in cols:
         html_out.append(f'    <col style="width:{cw:.1f}px;">')
@@ -174,7 +252,6 @@ def render_table(sh, slide_num):
 
     for r_idx, row in enumerate(rows):
         rh = row.get('height_px', 40.0)
-        # Banded row styling: header row slightly darker tint, alternating rows
         if r_idx == 0:
             bg_col = '#f4d7d7'
             font_weight = 'font-weight: bold;'
@@ -189,11 +266,10 @@ def render_table(sh, slide_num):
         for c_idx, cell in enumerate(row.get('cells', [])):
             c_fill = cell.get('fill')
             cell_bg = c_fill.get('color') if c_fill and c_fill.get('type') == 'solid' else bg_col
-            
+
             p_elems = cell.get('text', {}).get('paragraphs', [])
             cell_content = ''.join(render_paragraph(p, slide_num, font_scale=1.0) for p in p_elems)
-            
-            # Check cell text alignment
+
             cell_align = 'left'
             if p_elems and p_elems[0].get('algn') == 'r':
                 cell_align = 'right'
@@ -208,7 +284,13 @@ def render_table(sh, slide_num):
     html_out.append('</table>')
     return '\n'.join(html_out)
 
-def render_shape(sh, slide_num):
+def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
+    if shape_anims is None: shape_anims = {}
+    if para_anims is None: para_anims = {}
+
+    spid = str(sh.get('id') or sh.get('spid') or '')
+    shape_anim = shape_anims.get(spid)
+
     kind = sh.get('kind')
     geom = sh.get('geometry')
     x, y, w, h = sh.get('x', 0), sh.get('y', 0), sh.get('w', 0), sh.get('h', 0)
@@ -222,7 +304,7 @@ def render_shape(sh, slide_num):
 
     # Handle Table
     if kind == 'graphicFrame' and sh.get('table'):
-        return render_table(sh, slide_num)
+        return render_table(sh, slide_num, shape_anim)
 
     # Handle Pictures / Images
     if kind == 'pic' or img:
@@ -237,60 +319,91 @@ def render_shape(sh, slide_num):
             transforms.append('scaleY(-1)')
         trans_css = f'transform: {" ".join(transforms)};' if transforms else ''
 
+        anim_classes = ''
+        anim_attrs = f' data-spid="{spid}"' if spid else ''
+        if shape_anim:
+            st_num = shape_anim['step']
+            eff_name = shape_anim['effect']
+            eff_type = shape_anim['type']
+            anim_classes = f' neo-anim-target neo-anim-step-{st_num} neo-anim-{eff_name} anim-hidden'
+            anim_attrs += f' data-anim-step="{st_num}" data-anim-type="{eff_type}" data-anim-effect="{eff_name}"'
+
         if crop:
-            # overflow hidden container
-            return f'<div class="abs" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:hidden;{trans_css}"><img src="{img_src}" style="width:100%;height:100%;object-fit:cover;" alt=""></div>'
+            return f'<div class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:hidden;{trans_css}"{anim_attrs}><img src="{img_src}" style="width:100%;height:100%;object-fit:cover;" alt=""></div>'
         else:
             line_css = format_line_css(line)
-            return f'<img class="pic" src="{img_src}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;{line_css}{trans_css}" alt="">'
+            return f'<img class="pic{anim_classes}" src="{img_src}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;{line_css}{trans_css}" alt=""{anim_attrs}>'
 
-    # Handle Chevrons (like on slide 12)
+    # Handle Chevrons
     if geom == 'chevron':
         fill_col = fill.get('color', '#ef2640') if fill else '#ef2640'
-        return f'<svg class="abs" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;"><polygon points="0,0 {w*0.65:.1f},0 {w:.1f},{h/2:.1f} {w*0.65:.1f},{h:.1f} 0,{h:.1f} {w*0.35:.1f},{h/2:.1f}" fill="{fill_col}"/></svg>'
+        anim_classes = ''
+        anim_attrs = f' data-spid="{spid}"' if spid else ''
+        if shape_anim:
+            st_num = shape_anim['step']
+            eff_name = shape_anim['effect']
+            eff_type = shape_anim['type']
+            anim_classes = f' neo-anim-target neo-anim-step-{st_num} neo-anim-{eff_name} anim-hidden'
+            anim_attrs += f' data-anim-step="{st_num}" data-anim-type="{eff_type}" data-anim-effect="{eff_name}"'
 
-    # Handle Left Brace (curly bracket on slide 10)
+        return f'<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}><polygon points="0,0 {w*0.65:.1f},0 {w:.1f},{h/2:.1f} {w*0.65:.1f},{h:.1f} 0,{h:.1f} {w*0.35:.1f},{h/2:.1f}" fill="{fill_col}"/></svg>'
+
+    # Handle Left Brace
     if geom == 'leftBrace':
         line_col = line.get('color', '#003f62') if line else '#003f62'
         lw = line.get('width_px', 2.0) if line else 2.0
-        # Check if rotated (e.g. rot=270 is horizontal bracket)
+        anim_classes = ''
+        anim_attrs = f' data-spid="{spid}"' if spid else ''
+        if shape_anim:
+            st_num = shape_anim['step']
+            eff_name = shape_anim['effect']
+            eff_type = shape_anim['type']
+            anim_classes = f' neo-anim-target neo-anim-step-{st_num} neo-anim-{eff_name} anim-hidden'
+            anim_attrs += f' data-anim-step="{st_num}" data-anim-type="{eff_type}" data-anim-effect="{eff_name}"'
+
         if rot == 270.0:
-            # Draw horizontal curly brace bracket pointing downward
-            # Container width is h, height is w
             bw, bh = h, max(w, 40.0)
             bx, by = x + (w - bw)/2, y + (h - bh)/2
             mid = bw / 2
             d_path = f'M 0,5 C 20,5 20,{bh-15} 40,{bh-15} L {mid-30:.1f},{bh-15} C {mid-15:.1f},{bh-15} {mid-10:.1f},{bh-2} {mid:.1f},{bh-2} C {mid+10:.1f},{bh-2} {mid+15:.1f},{bh-15} {mid+30:.1f},{bh-15} L {bw-40:.1f},{bh-15} C {bw-20:.1f},{bh-15} {bw-20:.1f},5 {bw:.1f},5'
-            return f'<svg class="abs" style="left:{bx:.1f}px;top:{by:.1f}px;width:{bw:.1f}px;height:{bh:.1f}px;overflow:visible;"><path d="{d_path}" fill="none" stroke="{line_col}" stroke-width="{lw:.1f}"/></svg>'
+            return f'<svg class="abs{anim_classes}" style="left:{bx:.1f}px;top:{by:.1f}px;width:{bw:.1f}px;height:{bh:.1f}px;overflow:visible;"{anim_attrs}><path d="{d_path}" fill="none" stroke="{line_col}" stroke-width="{lw:.1f}"/></svg>'
         else:
-            return f'<svg class="abs" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;"><path d="M {w},0 C {w*0.3},0 {w*0.3},{h*0.4} 0,{h*0.5} C {w*0.3},{h*0.6} {w*0.3},{h} {w},{h}" fill="none" stroke="{line_col}" stroke-width="{lw:.1f}"/></svg>'
+            return f'<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}><path d="M {w},0 C {w*0.3},0 {w*0.3},{h*0.4} 0,{h*0.5} C {w*0.3},{h*0.6} {w*0.3},{h} {w},{h}" fill="none" stroke="{line_col}" stroke-width="{lw:.1f}"/></svg>'
 
     # Handle Lines and Arrows
     if kind == 'line' or geom == 'line' or (line and w <= 1.0 and h > 1.0) or (line and h <= 1.0 and w > 1.0):
         line_col = line.get('color', '#ffffff') if line else '#ffffff'
         lw = max(1.0, line.get('width_px', 1.0)) if line else 1.0
         is_arrow = 'Arrow' in sh.get('name', '')
-        
+
+        anim_classes = ''
+        anim_attrs = f' data-spid="{spid}"' if spid else ''
+        if shape_anim:
+            st_num = shape_anim['step']
+            eff_name = shape_anim['effect']
+            eff_type = shape_anim['type']
+            anim_classes = f' neo-anim-target neo-anim-step-{st_num} neo-anim-{eff_name} anim-hidden'
+            anim_attrs += f' data-anim-step="{st_num}" data-anim-type="{eff_type}" data-anim-effect="{eff_name}"'
+
         if w <= 1.0: # Vertical line
             if is_arrow:
                 arrow_sz = max(6.0, lw * 3.5)
-                return f'''<svg class="abs" style="left:{(x - arrow_sz/2):.1f}px;top:{y:.1f}px;width:{arrow_sz:.1f}px;height:{h:.1f}px;overflow:visible;">
+                return f'''<svg class="abs{anim_classes}" style="left:{(x - arrow_sz/2):.1f}px;top:{y:.1f}px;width:{arrow_sz:.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}>
   <line x1="{arrow_sz/2:.1f}" y1="0" x2="{arrow_sz/2:.1f}" y2="{(h - arrow_sz):.1f}" stroke="{line_col}" stroke-width="{lw:.1f}"/>
   <polygon points="0,{(h - arrow_sz):.1f} {arrow_sz:.1f},{(h - arrow_sz):.1f} {arrow_sz/2:.1f},{h:.1f}" fill="{line_col}"/>
 </svg>'''
             else:
-                return f'<div class="abs" style="left:{x:.1f}px;top:{y:.1f}px;width:{lw:.1f}px;height:{h:.1f}px;background:{line_col};"></div>'
+                return f'<div class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{lw:.1f}px;height:{h:.1f}px;background:{line_col};"{anim_attrs}></div>'
         elif h <= 1.0: # Horizontal line
             if is_arrow:
                 arrow_sz = max(6.0, lw * 3.5)
-                return f'''<svg class="abs" style="left:{x:.1f}px;top:{(y - arrow_sz/2):.1f}px;width:{w:.1f}px;height:{arrow_sz:.1f}px;overflow:visible;">
+                return f'''<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{(y - arrow_sz/2):.1f}px;width:{w:.1f}px;height:{arrow_sz:.1f}px;overflow:visible;"{anim_attrs}>
   <line x1="0" y1="{arrow_sz/2:.1f}" x2="{(w - arrow_sz):.1f}" y2="{arrow_sz/2:.1f}" stroke="{line_col}" stroke-width="{lw:.1f}"/>
   <polygon points="{(w - arrow_sz):.1f},0 {(w - arrow_sz):.1f},{arrow_sz:.1f} {w:.1f},{arrow_sz/2:.1f}" fill="{line_col}"/>
 </svg>'''
             else:
-                return f'<div class="abs" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{lw:.1f}px;background:{line_col};"></div>'
+                return f'<div class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{lw:.1f}px;background:{line_col};"{anim_attrs}></div>'
         else:
-            # Diagonal line / arrow
             arrow_sz = max(8.0, lw * 3.0) if is_arrow else 0
             if flip_h and flip_v:
                 x1, y1, x2, y2 = w, 0, 0, h
@@ -300,7 +413,7 @@ def render_shape(sh, slide_num):
                 x1, y1, x2, y2 = w, h, 0, 0
             else:
                 x1, y1, x2, y2 = 0, 0, w, h
-            
+
             arrowhead_svg = ''
             if is_arrow:
                 arrowhead_svg = f'''<defs>
@@ -312,7 +425,7 @@ def render_shape(sh, slide_num):
             else:
                 marker_attr = ''
 
-            return f'''<svg class="abs" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;">
+            return f'''<svg class="abs{anim_classes}" style="left:{x:.1f}px;top:{y:.1f}px;width:{w:.1f}px;height:{h:.1f}px;overflow:visible;"{anim_attrs}>
   {arrowhead_svg}
   <line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{line_col}" stroke-width="{lw:.1f}"{marker_attr}/>
 </svg>'''
@@ -342,22 +455,32 @@ def render_shape(sh, slide_num):
     if sh.get('shadow'):
         styles.append('box-shadow: 0 4px 14px rgba(0,0,0,0.3);')
 
-    transforms = []
-    if rot:
-        transforms.append(f'rotate({rot:.1f}deg)')
-    if flip_h:
-        transforms.append('scaleX(-1)')
-    if flip_v:
-        transforms.append('scaleY(-1)')
-    if transforms:
-        styles.append(f'transform: {" ".join(transforms)};')
-
     has_text_content = False
     if text:
         for p in text.get('paragraphs', []):
             if any(r.get('text', '').strip() or r.get('field') == 'slidenum' or r.get('text') == '‹#›' for r in p.get('runs', [])):
                 has_text_content = True
                 break
+
+    transforms = []
+    if rot:
+        transforms.append(f'rotate({rot:.1f}deg)')
+    if not has_text_content:
+        if flip_h:
+            transforms.append('scaleX(-1)')
+        if flip_v:
+            transforms.append('scaleY(-1)')
+    if transforms:
+        styles.append(f'transform: {" ".join(transforms)};')
+
+    anim_attrs = f' data-spid="{spid}"' if spid else ''
+
+    if shape_anim:
+        st_num = shape_anim['step']
+        eff_name = shape_anim['effect']
+        eff_type = shape_anim['type']
+        classes.extend(['neo-anim-target', f'neo-anim-step-{st_num}', f'neo-anim-{eff_name}', 'anim-hidden'])
+        anim_attrs += f' data-anim-step="{st_num}" data-anim-type="{eff_type}" data-anim-effect="{eff_name}"'
 
     if has_text_content:
         classes.append('tb')
@@ -382,18 +505,97 @@ def render_shape(sh, slide_num):
         if isinstance(autofit, dict) and autofit.get('font_scale_pct'):
             font_scale = autofit['font_scale_pct'] / 100.0
 
-        p_list = [render_paragraph(p, slide_num, font_scale) for p in text.get('paragraphs', [])]
-        p_list = [p for p in p_list if p]
+        p_list = []
+        raw_paras = list(text.get('paragraphs', []))
+        while raw_paras and (raw_paras[-1].get('empty') or not any(r.get('text', '').strip() for r in raw_paras[-1].get('runs', []))):
+            raw_paras = raw_paras[:-1]
+
+        auto_counters = {}
+        for p_idx, p in enumerate(raw_paras):
+            b = p.get('bullet', '')
+            auto_idx = 1
+            if b and b.startswith('auto:'):
+                b_key = (b, p.get('level', 0))
+                auto_counters[b_key] = auto_counters.get(b_key, 0) + 1
+                auto_idx = auto_counters[b_key]
+
+            p_anim = para_anims.get((spid, p_idx))
+            rendered_p = render_paragraph(p, slide_num, font_scale, p_idx, p_anim, auto_idx)
+            if rendered_p:
+                p_list.append(rendered_p)
+
         paragraphs_html = '\n'.join(p_list)
         class_attr = ' '.join(classes)
         style_attr = ' '.join(styles)
-        return f'<div class="{class_attr}" style="{style_attr}">\n{paragraphs_html}\n</div>'
+        return f'<div class="{class_attr}" style="{style_attr}"{anim_attrs}>\n{paragraphs_html}\n</div>'
     else:
         class_attr = ' '.join(classes)
         style_attr = ' '.join(styles)
-        return f'<div class="{class_attr}" style="{style_attr}"></div>'
+        return f'<div class="{class_attr}" style="{style_attr}"{anim_attrs}></div>'
+
+def build_slide_anim_map(slide_data):
+    anims = slide_data.get('animations')
+    if not anims or not anims.get('steps'):
+        return {}, {}
+
+    shape_anims = {}
+    para_anims = {}
+
+    for step_obj in anims['steps']:
+        step_num = step_obj['step']
+        for eff in step_obj.get('effects', []):
+            target_spid = str(eff.get('spid', ''))
+            p_range = eff.get('para_range')
+            eff_type = eff.get('type', 'entr')
+            eff_name = eff.get('effect', 'fade')
+            dur_ms = eff.get('dur_ms', 400)
+
+            matched = False
+            for sh in slide_data.get('shapes', []):
+                sh_id = str(sh.get('id', ''))
+                grp_ids = [str(g) for g in sh.get('group_ids', [])]
+                if sh_id == target_spid or target_spid in grp_ids:
+                    matched = True
+                    if p_range is not None:
+                        st, end = p_range
+                        for p_i in range(st, end + 1):
+                            para_anims[(sh_id, p_i)] = {
+                                'step': step_num,
+                                'type': eff_type,
+                                'effect': eff_name,
+                                'dur_ms': dur_ms
+                            }
+                    else:
+                        shape_anims[sh_id] = {
+                            'step': step_num,
+                            'type': eff_type,
+                            'effect': eff_name,
+                            'dur_ms': dur_ms
+                        }
+            if not matched:
+                if p_range is not None:
+                    st, end = p_range
+                    for p_i in range(st, end + 1):
+                        para_anims[(target_spid, p_i)] = {
+                            'step': step_num,
+                            'type': eff_type,
+                            'effect': eff_name,
+                            'dur_ms': dur_ms
+                        }
+                else:
+                    shape_anims[target_spid] = {
+                        'step': step_num,
+                        'type': eff_type,
+                        'effect': eff_name,
+                        'dur_ms': dur_ms
+                    }
+
+    return shape_anims, para_anims
 
 def build_slide_html(slide_data, layout_data, master_data, slide_index, slide_title):
+    shape_anims, para_anims = build_slide_anim_map(slide_data)
+    has_anims = bool(shape_anims or para_anims)
+
     # Determine background
     bg = slide_data.get('effective_background')
     bg_css = 'background: #ffffff;'
@@ -417,11 +619,96 @@ def build_slide_html(slide_data, layout_data, master_data, slide_index, slide_ti
     # Slide shapes
     slide_elements = []
     for sh in slide_data.get('shapes', []):
-        rendered = render_shape(sh, slide_index)
+        rendered = render_shape(sh, slide_index, shape_anims, para_anims)
         if rendered:
             slide_elements.append(rendered)
 
     all_content = '\n    '.join(decor_elements + slide_elements)
+
+    anim_script = ''
+    if has_anims:
+        anim_script = '''
+  <script>
+    (function() {
+      var currentStep = 0;
+      var targets = Array.prototype.slice.call(document.querySelectorAll('.neo-anim-target'));
+      if (targets.length === 0) return;
+
+      var steps = targets.map(function(el) { return parseInt(el.getAttribute('data-anim-step') || '0', 10); });
+      var maxStep = Math.max.apply(Math, [0].concat(steps));
+
+      function applyStep(step, animate) {
+        currentStep = Math.max(0, Math.min(step, maxStep));
+        for (var i = 0; i < targets.length; i++) {
+          var el = targets[i];
+          var elStep = parseInt(el.getAttribute('data-anim-step') || '0', 10);
+          var elType = el.getAttribute('data-anim-type') || 'entr';
+          if (elType === 'entr') {
+            if (currentStep >= elStep) {
+              el.classList.remove('anim-hidden');
+              el.classList.add('anim-visible');
+            } else {
+              el.classList.add('anim-hidden');
+              el.classList.remove('anim-visible');
+            }
+          } else if (elType === 'exit') {
+            if (currentStep >= elStep) {
+              el.classList.add('anim-hidden');
+              el.classList.remove('anim-visible');
+            } else {
+              el.classList.remove('anim-hidden');
+              el.classList.add('anim-visible');
+            }
+          }
+        }
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+              type: 'NEODECK_STEP_CHANGED',
+              currentStep: currentStep,
+              totalSteps: maxStep
+            }, '*');
+          }
+        } catch (_) {}
+      }
+
+      window.goToAnimStep = function(step, animate) { applyStep(step, animate !== false); };
+      window.nextAnimStep = function() {
+        if (currentStep < maxStep) {
+          applyStep(currentStep + 1, true);
+          return true;
+        }
+        return false;
+      };
+      window.prevAnimStep = function() {
+        if (currentStep > 0) {
+          applyStep(currentStep - 1, true);
+          return true;
+        }
+        return false;
+      };
+      window.getAnimState = function() {
+        return { currentStep: currentStep, totalSteps: maxStep };
+      };
+
+      // Start at step 0 (initial hidden state for entrances)
+      applyStep(0, false);
+
+      window.addEventListener('message', function(e) {
+        if (!e.data) return;
+        if (e.data.type === 'NEODECK_SET_STEP') {
+          applyStep(e.data.step, e.data.animate !== false);
+        } else if (e.data.type === 'NEODECK_NEXT_STEP') {
+          window.nextAnimStep();
+        } else if (e.data.type === 'NEODECK_PREV_STEP') {
+          window.prevAnimStep();
+        } else if (e.data.type === 'NEODECK_SHOW_ALL') {
+          document.body.classList.toggle('show-all-anims', !!e.data.showAll);
+        }
+      });
+    })();
+  </script>
+'''
 
     html_page = f'''<!DOCTYPE html>
 <html lang="en">
@@ -436,13 +723,138 @@ def build_slide_html(slide_data, layout_data, master_data, slide_index, slide_ti
   </style>
 </head>
 <body>
-  <main class="slide">
+  <main class="slide slide-container">
     {all_content}
-  </main>
+  </main>{anim_script}
 </body>
 </html>
 '''
     return html_page
+
+def generate_theme_css(data):
+    canvas = data.get('canvas', {})
+    cw = canvas.get('width', 1920)
+    ch = canvas.get('height', 1080)
+
+    colors = {}
+    fonts = {}
+    for m in data.get('masters', {}).values():
+        t = m.get('theme', {})
+        if t.get('colors'):
+            colors.update(t['colors'])
+        if t.get('fonts'):
+            fonts.update(t['fonts'])
+
+    dk1 = colors.get('dk1', '#111111')
+    lt1 = colors.get('lt1', '#ffffff')
+    dk2 = colors.get('dk2', '#333333')
+    lt2 = colors.get('lt2', '#f5f5f5')
+    acc1 = colors.get('accent1', '#3b82f6')
+    acc2 = colors.get('accent2', '#10b981')
+    acc3 = colors.get('accent3', '#f59e0b')
+    acc4 = colors.get('accent4', '#ef4444')
+    acc5 = colors.get('accent5', '#8b5cf6')
+    acc6 = colors.get('accent6', '#06b6d4')
+
+    heading_font = fonts.get('heading', 'Arial')
+    body_font = fonts.get('body', 'Arial')
+
+    return f"""/* Auto-generated Theme CSS from PowerPoint */
+:root {{
+  --slide-width: {cw}px;
+  --slide-height: {ch}px;
+  --slide-w: {cw}px;
+  --slide-h: {ch}px;
+
+  --color-primary: {acc1};
+  --color-secondary: {acc2};
+  --color-accent: {acc3};
+  --color-bg: {lt1};
+  --color-text: {dk1};
+
+  --dk1: {dk1};
+  --lt1: {lt1};
+  --dk2: {dk2};
+  --lt2: {lt2};
+  --accent1: {acc1};
+  --accent2: {acc2};
+  --accent3: {acc3};
+  --accent4: {acc4};
+  --accent5: {acc5};
+  --accent6: {acc6};
+
+  --font-heading: "{heading_font}", system-ui, -apple-system, sans-serif;
+  --font-body: "{body_font}", system-ui, -apple-system, sans-serif;
+}}
+
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+html, body {{ width: {cw}px; height: {ch}px; overflow: hidden; }}
+body {{ font-family: var(--font-body); color: var(--color-text); -webkit-font-smoothing: antialiased; }}
+
+.slide, .slide-container {{
+  position: relative;
+  width: {cw}px;
+  height: {ch}px;
+  overflow: hidden;
+  background-color: var(--color-bg);
+}}
+
+.abs {{ position: absolute; }}
+
+.tb {{
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  white-space: normal;
+}}
+.tb p {{ margin: 0; }}
+.tb.anchor-t {{ justify-content: flex-start; }}
+.tb.anchor-ctr {{ justify-content: center; }}
+.tb.anchor-b {{ justify-content: flex-end; }}
+
+.heading {{ font-family: var(--font-heading); }}
+.bullet-list {{ list-style: none; }}
+.bullet-list li {{ position: relative; }}
+
+img.pic {{ position: absolute; object-fit: fill; display: block; }}
+
+/* Animation Targets & Effects */
+.neo-anim-target {{
+  transition: opacity 0.35s ease, transform 0.35s ease, clip-path 0.35s ease;
+}}
+
+body:not(.show-all-anims):not(.edit-mode) .neo-anim-target.anim-hidden {{
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}}
+
+body:not(.show-all-anims):not(.edit-mode) .neo-anim-target.anim-hidden.neo-anim-wipe-down {{
+  clip-path: inset(0 0 100% 0) !important;
+  opacity: 0 !important;
+}}
+body:not(.show-all-anims):not(.edit-mode) .neo-anim-target.anim-hidden.neo-anim-wipe-up {{
+  clip-path: inset(100% 0 0 0) !important;
+  opacity: 0 !important;
+}}
+body:not(.show-all-anims):not(.edit-mode) .neo-anim-target.anim-hidden.neo-anim-wipe-left {{
+  clip-path: inset(0 0 0 100%) !important;
+  opacity: 0 !important;
+}}
+body:not(.show-all-anims):not(.edit-mode) .neo-anim-target.anim-hidden.neo-anim-wipe-right {{
+  clip-path: inset(0 100% 0 0) !important;
+  opacity: 0 !important;
+}}
+
+.neo-anim-target.anim-visible,
+body.show-all-anims .neo-anim-target,
+body.edit-mode .neo-anim-target {{
+  opacity: 1 !important;
+  visibility: visible !important;
+  clip-path: inset(0 0 0 0) !important;
+}}
+"""
 
 def main():
     parser = argparse.ArgumentParser(description='Generate NeoPowerPoint deck from extract.json')
@@ -462,6 +874,26 @@ def main():
 
     manifest_slides = []
     active_idx = 1
+
+    # Setup assets directory and copy media
+    assets_dir = os.path.join(out_dir, 'assets')
+    os.makedirs(assets_dir, exist_ok=True)
+
+    extract_media_dir = os.path.join(os.path.dirname(extract_path), 'media')
+    if os.path.isdir(extract_media_dir):
+        dest_media_dir = os.path.join(assets_dir, 'media')
+        os.makedirs(dest_media_dir, exist_ok=True)
+        import shutil
+        for item in os.listdir(extract_media_dir):
+            s_item = os.path.join(extract_media_dir, item)
+            d_item = os.path.join(dest_media_dir, item)
+            if os.path.isfile(s_item):
+                shutil.copy2(s_item, d_item)
+
+    # Write assets/theme.css
+    theme_css_content = generate_theme_css(data)
+    with open(os.path.join(assets_dir, 'theme.css'), 'w') as tf:
+        tf.write(theme_css_content)
 
     for s in raw_slides:
         if s.get('hidden'):
@@ -499,24 +931,8 @@ def main():
             slide_title = f'Slide {active_idx}'
 
         # Clean title overrides for well-known slides
-        if s.get('number') == 1:
-            slide_title = 'Security & AI WG'
-        elif s.get('number') == 4:
-            slide_title = 'Legal Disclosures: Antitrust Guidelines'
-        elif s.get('number') == 5:
-            slide_title = 'Legal Disclosures: Intellectual Property & Licensing'
-        elif s.get('number') == 6:
-            slide_title = 'Meeting Guidelines'
-        elif s.get('number') == 10:
-            slide_title = 'Delta-Zero: Reducing the Window of Vulnerability Exposure'
-        elif s.get('number') == 11:
-            slide_title = 'A DOCSIS-Specific Threat Model'
-        elif s.get('number') == 12:
-            slide_title = 'Repeatable Harnesses for Code Scanning'
-        elif s.get('number') == 20:
-            slide_title = 'Scan Orchestration and Standard Output Manifests'
-        elif s.get('number') == 21:
-            slide_title = 'Scanning Harness Updates – RDK-B'
+        if s.get('number') == 1 and not slide_title.strip():
+            slide_title = 'Title Slide'
 
         folder_name = f'{active_idx:02d}-{slugify(slide_title)}'
         slide_dir = os.path.join(out_dir, 'slides', folder_name)
@@ -529,24 +945,41 @@ def main():
         rel_path = f'slides/{folder_name}/index.html'
         notes = (s.get('notes') or '').strip()
 
-        manifest_slides.append({
+        slide_entry = {
             'id': f'slide-{active_idx}',
             'title': slide_title,
             'path': rel_path,
             'notes': notes,
             'transition': 'fade'
-        })
+        }
+        if s.get('animations') and s['animations'].get('total_steps', 0) > 0:
+            slide_entry['hasAnimations'] = True
+            slide_entry['animationSteps'] = s['animations']['total_steps']
+
+        manifest_slides.append(slide_entry)
 
         print(f'Generated slide {active_idx:02d} (orig {s.get("number")}): {slide_title} -> {rel_path}')
         active_idx += 1
 
+    deck_title = manifest_slides[0]['title'] if manifest_slides else 'Presentation'
+    if data.get('source'):
+        src_clean = os.path.splitext(os.path.basename(data['source']))[0].replace('_', ' ')
+        if manifest_slides and manifest_slides[0]['title'] not in ('Slide 1', ''):
+            deck_title = manifest_slides[0]['title']
+        else:
+            deck_title = src_clean
+
+    canvas = data.get('canvas', {})
+    cw = canvas.get('width', 1920)
+    ch = canvas.get('height', 1080)
+
     # Write deck.json
     deck_json = {
         'version': '1.0.0',
-        'title': 'Security & AI WG',
+        'title': deck_title,
         'aspectRatio': '16:9',
-        'customWidth': 1920,
-        'customHeight': 1080,
+        'customWidth': cw,
+        'customHeight': ch,
         'theme': 'dark',
         'defaultTransition': 'fade',
         'slides': manifest_slides

@@ -110,7 +110,48 @@ def render_run(run, slide_num, font_scale=1.0):
         return f'<a href="{href}" target="_blank" rel="noopener"{style_attr}>{escaped}</a>'
     return f'<span{style_attr}>{escaped}</span>'
 
-def render_paragraph(p, slide_num, font_scale=1.0, p_idx=None, para_anim=None):
+def to_roman(num):
+    val = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+    syb = ["m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i"]
+    res = ""
+    i = 0
+    n = max(1, num)
+    while n > 0 and i < len(val):
+        for _ in range(n // val[i]):
+            res += syb[i]
+            n -= val[i]
+        i += 1
+    return res
+
+def format_bullet_str(bullet_raw, auto_idx=1):
+    if not bullet_raw:
+        return ''
+    if not bullet_raw.startswith('auto:'):
+        return bullet_raw
+    btype = bullet_raw[5:]
+    if btype == 'romanLcPeriod':
+        return f'{to_roman(auto_idx)}.'
+    elif btype == 'romanUcPeriod':
+        return f'{to_roman(auto_idx).upper()}.'
+    elif btype == 'romanLcParenR':
+        return f'{to_roman(auto_idx)})'
+    elif btype == 'romanUcParenR':
+        return f'{to_roman(auto_idx).upper()})'
+    elif btype == 'arabicPeriod':
+        return f'{auto_idx}.'
+    elif btype == 'arabicParenR':
+        return f'{auto_idx})'
+    elif btype == 'alphaLcPeriod':
+        return f'{chr(ord("a") + (auto_idx - 1) % 26)}.'
+    elif btype == 'alphaUcPeriod':
+        return f'{chr(ord("A") + (auto_idx - 1) % 26)}.'
+    elif btype == 'alphaLcParenR':
+        return f'{chr(ord("a") + (auto_idx - 1) % 26)})'
+    elif btype == 'alphaUcParenR':
+        return f'{chr(ord("A") + (auto_idx - 1) % 26)})'
+    return f'{auto_idx}.'
+
+def render_paragraph(p, slide_num, font_scale=1.0, p_idx=None, para_anim=None, auto_idx=1):
     p_styles = []
     p_classes = []
     anim_attrs = ''
@@ -154,16 +195,21 @@ def render_paragraph(p, slide_num, font_scale=1.0, p_idx=None, para_anim=None):
         p_styles.append(f'margin-bottom: {p["space_after"]["px"]:.1f}px;')
 
     runs_html = ''.join(render_run(r, slide_num, font_scale) for r in p.get('runs', []))
-    if not runs_html.strip():
-        return ''
+    class_attr = f' class="{" ".join(p_classes)}"' if p_classes else ''
+
+    if p.get('empty') or not runs_html.strip():
+        empty_sz = p.get('style', {}).get('size_px') or 24.0
+        p_styles.append(f'min-height: {(empty_sz * font_scale):.1f}px;')
+        style_attr = f' style="{" ".join(p_styles)}"' if p_styles else ''
+        return f'<p{class_attr}{style_attr}{anim_attrs}><span style="font-size: {(empty_sz * font_scale):.1f}px;">&nbsp;</span></p>'
+
     bullet = p.get('bullet')
     mar_l = p.get('marL', 0)
     indent = p.get('indent', 0)
 
-    class_attr = f' class="{" ".join(p_classes)}"' if p_classes else ''
-
     if bullet:
-        bullet_char = html.escape(bullet)
+        bullet_text = format_bullet_str(bullet, auto_idx)
+        bullet_char = html.escape(bullet_text)
         indent_val = max(24.0, abs(indent) if indent else 32.0)
         p_styles.append(f'position: relative; padding-left: {mar_l:.1f}px;')
         style_attr = f' style="{" ".join(p_styles)}"' if p_styles else ''
@@ -409,22 +455,23 @@ def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
     if sh.get('shadow'):
         styles.append('box-shadow: 0 4px 14px rgba(0,0,0,0.3);')
 
-    transforms = []
-    if rot:
-        transforms.append(f'rotate({rot:.1f}deg)')
-    if flip_h:
-        transforms.append('scaleX(-1)')
-    if flip_v:
-        transforms.append('scaleY(-1)')
-    if transforms:
-        styles.append(f'transform: {" ".join(transforms)};')
-
     has_text_content = False
     if text:
         for p in text.get('paragraphs', []):
             if any(r.get('text', '').strip() or r.get('field') == 'slidenum' or r.get('text') == '‹#›' for r in p.get('runs', [])):
                 has_text_content = True
                 break
+
+    transforms = []
+    if rot:
+        transforms.append(f'rotate({rot:.1f}deg)')
+    if not has_text_content:
+        if flip_h:
+            transforms.append('scaleX(-1)')
+        if flip_v:
+            transforms.append('scaleY(-1)')
+    if transforms:
+        styles.append(f'transform: {" ".join(transforms)};')
 
     anim_attrs = f' data-spid="{spid}"' if spid else ''
 
@@ -459,9 +506,21 @@ def render_shape(sh, slide_num, shape_anims=None, para_anims=None):
             font_scale = autofit['font_scale_pct'] / 100.0
 
         p_list = []
-        for p_idx, p in enumerate(text.get('paragraphs', [])):
+        raw_paras = list(text.get('paragraphs', []))
+        while raw_paras and (raw_paras[-1].get('empty') or not any(r.get('text', '').strip() for r in raw_paras[-1].get('runs', []))):
+            raw_paras = raw_paras[:-1]
+
+        auto_counters = {}
+        for p_idx, p in enumerate(raw_paras):
+            b = p.get('bullet', '')
+            auto_idx = 1
+            if b and b.startswith('auto:'):
+                b_key = (b, p.get('level', 0))
+                auto_counters[b_key] = auto_counters.get(b_key, 0) + 1
+                auto_idx = auto_counters[b_key]
+
             p_anim = para_anims.get((spid, p_idx))
-            rendered_p = render_paragraph(p, slide_num, font_scale, p_idx, p_anim)
+            rendered_p = render_paragraph(p, slide_num, font_scale, p_idx, p_anim, auto_idx)
             if rendered_p:
                 p_list.append(rendered_p)
 
@@ -485,28 +544,51 @@ def build_slide_anim_map(slide_data):
     for step_obj in anims['steps']:
         step_num = step_obj['step']
         for eff in step_obj.get('effects', []):
-            spid = str(eff.get('spid', ''))
+            target_spid = str(eff.get('spid', ''))
             p_range = eff.get('para_range')
             eff_type = eff.get('type', 'entr')
             eff_name = eff.get('effect', 'fade')
             dur_ms = eff.get('dur_ms', 400)
 
-            if p_range is not None:
-                st, end = p_range
-                for p_i in range(st, end + 1):
-                    para_anims[(spid, p_i)] = {
+            matched = False
+            for sh in slide_data.get('shapes', []):
+                sh_id = str(sh.get('id', ''))
+                grp_ids = [str(g) for g in sh.get('group_ids', [])]
+                if sh_id == target_spid or target_spid in grp_ids:
+                    matched = True
+                    if p_range is not None:
+                        st, end = p_range
+                        for p_i in range(st, end + 1):
+                            para_anims[(sh_id, p_i)] = {
+                                'step': step_num,
+                                'type': eff_type,
+                                'effect': eff_name,
+                                'dur_ms': dur_ms
+                            }
+                    else:
+                        shape_anims[sh_id] = {
+                            'step': step_num,
+                            'type': eff_type,
+                            'effect': eff_name,
+                            'dur_ms': dur_ms
+                        }
+            if not matched:
+                if p_range is not None:
+                    st, end = p_range
+                    for p_i in range(st, end + 1):
+                        para_anims[(target_spid, p_i)] = {
+                            'step': step_num,
+                            'type': eff_type,
+                            'effect': eff_name,
+                            'dur_ms': dur_ms
+                        }
+                else:
+                    shape_anims[target_spid] = {
                         'step': step_num,
                         'type': eff_type,
                         'effect': eff_name,
                         'dur_ms': dur_ms
                     }
-            else:
-                shape_anims[spid] = {
-                    'step': step_num,
-                    'type': eff_type,
-                    'effect': eff_name,
-                    'dur_ms': dur_ms
-                }
 
     return shape_anims, para_anims
 

@@ -101,7 +101,34 @@ async function runTests() {
   if (!sampleHtml.includes('NEODECK_NEXT_STEP') || !sampleHtml.includes('goToAnimStep')) {
     throw new Error(`Sample animated slide (${sampleAnimSlide.path}) missing embedded animation step controller script`);
   }
-  console.log(`✓ Validated slide HTML (${sampleAnimSlide.path}) contains animated elements and runtime step controller`);
+  // 6. Inspect slide 14 (ensuring text with flipH is not backwards)
+  const slide14 = manifest.slides.find(s => s.path.includes('14-reflections-on-best-effort-service'));
+  if (slide14) {
+    const s14Html = await fs.promises.readFile(path.join(convertedDeckDir, slide14.path), 'utf-8');
+    if (s14Html.includes('scaleX(-1)')) {
+      throw new Error('Slide 14 text should not contain scaleX(-1) (backwards/mirrored text)');
+    }
+    if (!s14Html.includes('It’s hard to argue with success of best-effort service model')) {
+      throw new Error('Slide 14 missing expected red text');
+    }
+    console.log('✓ Validated slide 14 red text is rendered upright and not mirrored');
+  }
+
+  // 7. Inspect slide 12 (ensuring no auto:romanLcPeriod overflow, proper spacing, group animation)
+  const slide12 = manifest.slides.find(s => s.path.includes('12-network-layer-service-model'));
+  if (slide12) {
+    const s12Html = await fs.promises.readFile(path.join(convertedDeckDir, slide12.path), 'utf-8');
+    if (s12Html.includes('auto:romanLcPeriod')) {
+      throw new Error('Slide 12 contains literal auto:romanLcPeriod instead of formatted Roman numeral');
+    }
+    if (!s12Html.includes('>i.</span>') || !s12Html.includes('>ii.</span>') || !s12Html.includes('>iii.</span>')) {
+      throw new Error('Slide 12 missing properly formatted Roman numerals i., ii., iii.');
+    }
+    if (!s12Html.includes('neo-anim-step-1')) {
+      throw new Error('Slide 12 missing group animation step');
+    }
+    console.log('✓ Validated slide 12 has properly formatted Roman numerals, spacer paragraphs, and group animation');
+  }
 
   console.log('\n🎉 ALL PPTX ANIMATION TESTS PASSED SUCCESSFULLY!');
 }

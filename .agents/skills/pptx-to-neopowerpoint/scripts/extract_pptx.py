@@ -394,7 +394,8 @@ def parse_shape(ctx, sp, rels, chain, tf, source, master_txstyles):
     nvpr, cnv = nv_pr(sp)
     ph = ph_of(sp)
     name = cnv.get('name') if cnv is not None else ''
-    out = {'name': name, 'kind': kind}
+    sp_id = cnv.get('id') if cnv is not None else None
+    out = {'id': sp_id, 'spid': sp_id, 'name': name, 'kind': kind}
     if cnv is not None and cnv.get('descr'):
         out['alt_text'] = cnv.get('descr')
     if ph:
@@ -558,7 +559,9 @@ def parse_chart(ctx, part):
     return out
 
 
-def walk_tree(ctx, tree, rels, layout_root, master_root, tf, source, master_txstyles, out):
+def walk_tree(ctx, tree, rels, layout_root, master_root, tf, source, master_txstyles, out, group_ids=None):
+    if tree is None:
+        return
     for sp in tree:
         n = local(sp)
         if n in ('sp', 'pic', 'graphicFrame', 'cxnSp'):
@@ -568,8 +571,15 @@ def walk_tree(ctx, tree, rels, layout_root, master_root, tf, source, master_txst
                 chain = [find_ph(master_root, ph), find_ph(layout_root, ph)]
             res = parse_shape(ctx, sp, rels, chain, tf, source, master_txstyles)
             if res:
+                if group_ids:
+                    res['group_ids'] = list(group_ids)
                 out.append(res)
         elif n == 'grpSp':
+            _, cnv = nv_pr(sp)
+            grp_id = cnv.get('id') if cnv is not None else None
+            new_groups = list(group_ids or [])
+            if grp_id:
+                new_groups.append(str(grp_id))
             xf = sp.find('p:grpSpPr/a:xfrm', NS)
             ntf = tf
             if xf is not None and xf.find('a:chExt', NS) is not None:
@@ -580,7 +590,95 @@ def walk_tree(ctx, tree, rels, layout_root, master_root, tf, source, master_txst
                 gx = tf[0] + (int(off.get('x')) - int(choff.get('x')) * sx) * tf[2]
                 gy = tf[1] + (int(off.get('y')) - int(choff.get('y')) * sy) * tf[3]
                 ntf = (gx, gy, sx * tf[2], sy * tf[3])
-            walk_tree(ctx, sp, rels, layout_root, master_root, ntf, source, master_txstyles, out)
+            walk_tree(ctx, sp, rels, layout_root, master_root, ntf, source, master_txstyles, out, new_groups)
+
+
+def parse_slide_timing(root):
+    timing = root.find('p:timing', NS)
+    if timing is None:
+        return None
+    seq = timing.find('.//p:seq', NS)
+    if seq is None:
+        return None
+    cTn_seq = seq.find('p:cTn', NS)
+    if cTn_seq is None:
+        return None
+    childTnLst = cTn_seq.find('p:childTnLst', NS)
+    if childTnLst is None:
+        return None
+
+    steps = []
+    for par in childTnLst.findall('p:par', NS):
+        step_effects = []
+        for ctn in par.findall('.//p:cTn', NS):
+            pClass = ctn.attrib.get('presetClass')
+            pId = ctn.attrib.get('presetID')
+            subType = ctn.attrib.get('presetSubtype')
+            nodeType = ctn.attrib.get('nodeType', 'clickEffect')
+            dur = ctn.attrib.get('dur')
+            dur_ms = int(dur) if dur and dur.isdigit() else 400
+
+            anim_eff = ctn.find('.//p:animEffect', NS)
+            effect_filter = anim_eff.attrib.get('filter') if anim_eff is not None else None
+
+            for cBhvr in ctn.findall('.//p:cBhvr', NS):
+                tgt = cBhvr.find('p:tgtEl', NS)
+                if tgt is None:
+                    continue
+                spTgt = tgt.find('p:spTgt', NS)
+                if spTgt is None:
+                    continue
+                spid = spTgt.attrib.get('spid')
+                if not spid:
+                    continue
+                txEl = spTgt.find('p:txEl', NS)
+                p_range = None
+                if txEl is not None:
+                    pRg = txEl.find('p:pRg', NS)
+                    if pRg is not None:
+                        st = int(pRg.attrib.get('st', 0))
+                        end = int(pRg.attrib.get('end', st))
+                        p_range = [st, end]
+
+                effect_name = 'appear'
+                if effect_filter:
+                    if 'dissolve' in effect_filter or 'fade' in effect_filter:
+                        effect_name = 'fade'
+                    elif 'wipe' in effect_filter:
+                        if 'left' in effect_filter: effect_name = 'wipe-left'
+                        elif 'right' in effect_filter: effect_name = 'wipe-right'
+                        elif 'up' in effect_filter: effect_name = 'wipe-up'
+                        elif 'down' in effect_filter: effect_name = 'wipe-down'
+                        else: effect_name = 'wipe-right'
+                elif pId == '9':
+                    effect_name = 'fade'
+                elif pId == '22':
+                    if subType == '1': effect_name = 'wipe-down'
+                    elif subType == '2': effect_name = 'wipe-left'
+                    elif subType == '4': effect_name = 'wipe-right'
+                    elif subType == '8': effect_name = 'wipe-up'
+                    else: effect_name = 'wipe-right'
+                elif pClass == 'exit':
+                    effect_name = 'fade-out'
+
+                existing = [e for e in step_effects if e['spid'] == spid and e['para_range'] == p_range and e['type'] == (pClass or 'entr')]
+                if not existing:
+                    step_effects.append({
+                        'spid': spid,
+                        'para_range': p_range,
+                        'type': pClass or 'entr',
+                        'effect': effect_name,
+                        'node_type': nodeType,
+                        'dur_ms': dur_ms
+                    })
+        if step_effects:
+            steps.append({
+                'step': len(steps) + 1,
+                'effects': step_effects
+            })
+    if not steps:
+        return None
+    return {'total_steps': len(steps), 'steps': steps}
 
 
 def background(ctx, root, rels):
@@ -710,6 +808,7 @@ def main():
             'background': own_bg,
             'effective_background': own_bg or layout['background'] or m['background'],
             'notes': notes,
+            'animations': parse_slide_timing(root),
             'shapes': shapes,
         })
 
