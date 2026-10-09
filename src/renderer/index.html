@@ -177,13 +177,34 @@
         <div id="slides-list" class="slides-list">
           <!-- Slide items generated dynamically -->
         </div>
-        <!-- Notes Preview / Editor Panel at bottom of sidebar -->
-        <div class="sidebar-notes-panel">
+        <!-- Resizable Speaker Notes Panel with Rich Text Formatting -->
+        <div id="notes-resizer" class="notes-resizer" title="Drag to resize speaker notes panel"></div>
+        <div id="sidebar-notes-panel" class="sidebar-notes-panel">
           <div class="notes-panel-header">
-            <h4>Speaker Notes</h4>
-            <button id="btn-save-notes" class="btn-text">Save</button>
+            <div class="notes-header-left">
+              <h4>Speaker Notes</h4>
+              <span id="notes-save-status" class="notes-save-status">Saved</span>
+            </div>
+            <div class="notes-header-actions">
+              <button id="btn-expand-notes" class="btn-icon btn-micro" title="Expand Notes to Large Window">⤢</button>
+              <button id="btn-save-notes" class="btn-text">Save</button>
+            </div>
           </div>
-          <textarea id="slide-notes-editor" placeholder="Add presenter speaker notes for this slide..."></textarea>
+
+          <!-- Notes Formatting Toolbar -->
+          <div class="notes-toolbar">
+            <button id="btn-notes-bold" class="btn-micro" title="Bold (Ctrl+B)"><b>B</b></button>
+            <button id="btn-notes-italic" class="btn-micro" title="Italic (Ctrl+I)"><i>I</i></button>
+            <button id="btn-notes-underline" class="btn-micro" title="Underline (Ctrl+U)"><u>U</u></button>
+            <div class="notes-toolbar-divider"></div>
+            <button id="btn-notes-bullet" class="btn-micro" title="Bulleted List">•≡</button>
+            <button id="btn-notes-number" class="btn-micro" title="Numbered List">1.≡</button>
+            <div class="notes-toolbar-divider"></div>
+            <button id="btn-notes-font-down" class="btn-micro" title="Decrease Font Size">A−</button>
+            <button id="btn-notes-font-up" class="btn-micro" title="Increase Font Size">A+</button>
+          </div>
+
+          <div id="slide-notes-editor" class="slide-notes-editor" contenteditable="true" data-placeholder="Type speaker notes here... Use formatting bar for bullets, bold, lists."></div>
         </div>
       </aside>
 
@@ -245,6 +266,38 @@
         </div>
         <div id="overview-grid" class="overview-grid">
           <!-- Slide cards populated dynamically with live previews -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Expanded Speaker Notes Modal Window -->
+    <div id="notes-modal" class="modal-overlay hidden">
+      <div class="notes-modal-container">
+        <div class="notes-modal-header">
+          <div class="notes-modal-title">
+            <h3>Speaker Notes &amp; Script Editor</h3>
+            <span id="notes-modal-slide-title" class="notes-modal-subtitle">Slide 1</span>
+          </div>
+          <div class="notes-modal-header-actions">
+            <button id="btn-notes-modal-save" class="btn btn-primary btn-sm">💾 Save Notes</button>
+            <button id="btn-close-notes-modal" class="btn-icon" title="Close Window (Esc)">✕</button>
+          </div>
+        </div>
+
+        <div class="notes-modal-toolbar">
+          <button id="btn-m-notes-bold" class="btn-icon btn-sm" title="Bold (Ctrl+B)"><b>B</b></button>
+          <button id="btn-m-notes-italic" class="btn-icon btn-sm" title="Italic (Ctrl+I)"><i>I</i></button>
+          <button id="btn-m-notes-underline" class="btn-icon btn-sm" title="Underline (Ctrl+U)"><u>U</u></button>
+          <div class="editor-toolbar-divider"></div>
+          <button id="btn-m-notes-bullet" class="btn btn-secondary btn-sm" title="Bullet List">• Bullet List</button>
+          <button id="btn-m-notes-number" class="btn btn-secondary btn-sm" title="Numbered List">1. Numbered List</button>
+          <div class="editor-toolbar-divider"></div>
+          <button id="btn-m-notes-font-down" class="btn-icon btn-sm" title="Decrease Font Size">A−</button>
+          <button id="btn-m-notes-font-up" class="btn-icon btn-sm" title="Increase Font Size">A+</button>
+        </div>
+
+        <div class="notes-modal-body">
+          <div id="modal-notes-editor" class="modal-notes-editor" contenteditable="true" data-placeholder="Type or format your speaker script and presentation notes here..."></div>
         </div>
       </div>
     </div>

@@ -35,7 +35,13 @@ class PresentationApp {
   private slidesListEl = document.getElementById('slides-list')!;
   private deckTitleEl = document.getElementById('deck-title')!;
   private slideCounterEl = document.getElementById('slide-counter')!;
-  private notesEditorEl = document.getElementById('slide-notes-editor') as HTMLTextAreaElement;
+  private notesEditorEl = document.getElementById('slide-notes-editor') as HTMLElement;
+  private modalNotesEditorEl = document.getElementById('modal-notes-editor') as HTMLElement;
+  private notesModalEl = document.getElementById('notes-modal')!;
+  private notesSaveStatusEl = document.getElementById('notes-save-status');
+  private notesResizerEl = document.getElementById('notes-resizer')!;
+  private sidebarNotesPanelEl = document.getElementById('sidebar-notes-panel')!;
+  private notesAutoSaveTimer: any = null;
   private liveBadgeEl = document.getElementById('live-badge')!;
 
   // Floating controls
@@ -64,6 +70,8 @@ class PresentationApp {
 
   constructor() {
     this.setupEventListeners();
+    this.setupNotesResizer();
+    this.setupNotesControls();
     this.setupScaler();
     this.setupOverviewScaler();
     this.setupSidebarScaler();
@@ -140,6 +148,12 @@ class PresentationApp {
     // Sidebar & Notes
     document.getElementById('btn-sidebar-add-slide')!.addEventListener('click', () => this.promptNewSlide());
     document.getElementById('btn-save-notes')!.addEventListener('click', () => this.saveNotes());
+    document.getElementById('btn-expand-notes')?.addEventListener('click', () => this.toggleNotesModal(true));
+    document.getElementById('btn-close-notes-modal')?.addEventListener('click', () => this.toggleNotesModal(false));
+    document.getElementById('btn-notes-modal-save')?.addEventListener('click', () => {
+      this.saveNotes();
+      this.toggleNotesModal(false);
+    });
 
     // Modals
     document.getElementById('btn-close-overview')!.addEventListener('click', () => this.toggleOverview(false));
@@ -449,7 +463,9 @@ class PresentationApp {
       e.preventDefault();
       this.toggleShortcuts();
     } else if (e.key === 'Escape') {
-      if (!this.overviewModalEl.classList.contains('hidden')) {
+      if (!this.notesModalEl.classList.contains('hidden')) {
+        this.toggleNotesModal(false);
+      } else if (!this.overviewModalEl.classList.contains('hidden')) {
         this.toggleOverview(false);
       } else if (!this.shortcutsModalEl.classList.contains('hidden')) {
         this.toggleShortcuts(false);
@@ -635,7 +651,11 @@ class PresentationApp {
 
     // Update Sidebar Selection & Notes immediately
     this.updateSidebarSelection();
-    this.notesEditorEl.value = currentSlide.notes || '';
+    const rawNotes = currentSlide.notes || '';
+    this.notesEditorEl.innerHTML = rawNotes;
+    if (this.modalNotesEditorEl) {
+      this.modalNotesEditorEl.innerHTML = rawNotes;
+    }
 
     // Synchronize to Presenter View
     this.syncPresenterState();
@@ -826,12 +846,134 @@ class PresentationApp {
     });
   }
 
+  private setupNotesResizer(): void {
+    // Restore saved height from local storage if exists
+    const savedH = localStorage.getItem('neo-notes-height');
+    if (savedH) {
+      this.sidebarNotesPanelEl.style.setProperty('--notes-panel-height', `${savedH}px`);
+    }
+
+    let isResizing = false;
+    let startY = 0;
+    let startH = 0;
+
+    this.notesResizerEl.addEventListener('mousedown', (e: MouseEvent) => {
+      e.preventDefault();
+      isResizing = true;
+      startY = e.clientY;
+      startH = this.sidebarNotesPanelEl.clientHeight;
+      this.notesResizerEl.classList.add('dragging');
+      document.body.style.cursor = 'row-resize';
+      document.body.style.userSelect = 'none';
+
+      const onMouseMove = (me: MouseEvent) => {
+        if (!isResizing) return;
+        const delta = startY - me.clientY;
+        const newH = Math.max(100, Math.min(window.innerHeight * 0.75, startH + delta));
+        this.sidebarNotesPanelEl.style.setProperty('--notes-panel-height', `${newH}px`);
+      };
+
+      const onMouseUp = () => {
+        if (isResizing) {
+          isResizing = false;
+          this.notesResizerEl.classList.remove('dragging');
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          const finalH = this.sidebarNotesPanelEl.clientHeight;
+          localStorage.setItem('neo-notes-height', String(finalH));
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+        }
+      };
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    });
+  }
+
+  private setupNotesControls(): void {
+    // Sidebar Toolbar Buttons
+    document.getElementById('btn-notes-bold')?.addEventListener('click', () => this.execNotesCommand('bold'));
+    document.getElementById('btn-notes-italic')?.addEventListener('click', () => this.execNotesCommand('italic'));
+    document.getElementById('btn-notes-underline')?.addEventListener('click', () => this.execNotesCommand('underline'));
+    document.getElementById('btn-notes-bullet')?.addEventListener('click', () => this.execNotesCommand('insertUnorderedList'));
+    document.getElementById('btn-notes-number')?.addEventListener('click', () => this.execNotesCommand('insertOrderedList'));
+    document.getElementById('btn-notes-font-down')?.addEventListener('click', () => this.adjustNotesFontSize(-1, 'sidebar'));
+    document.getElementById('btn-notes-font-up')?.addEventListener('click', () => this.adjustNotesFontSize(1, 'sidebar'));
+
+    // Modal Toolbar Buttons
+    document.getElementById('btn-m-notes-bold')?.addEventListener('click', () => this.execNotesCommand('bold'));
+    document.getElementById('btn-m-notes-italic')?.addEventListener('click', () => this.execNotesCommand('italic'));
+    document.getElementById('btn-m-notes-underline')?.addEventListener('click', () => this.execNotesCommand('underline'));
+    document.getElementById('btn-m-notes-bullet')?.addEventListener('click', () => this.execNotesCommand('insertUnorderedList'));
+    document.getElementById('btn-m-notes-number')?.addEventListener('click', () => this.execNotesCommand('insertOrderedList'));
+    document.getElementById('btn-m-notes-font-down')?.addEventListener('click', () => this.adjustNotesFontSize(-1, 'modal'));
+    document.getElementById('btn-m-notes-font-up')?.addEventListener('click', () => this.adjustNotesFontSize(1, 'modal'));
+
+    // Live Typing & Auto-saving
+    this.notesEditorEl?.addEventListener('input', () => this.onNotesInput('sidebar'));
+    this.modalNotesEditorEl?.addEventListener('input', () => this.onNotesInput('modal'));
+  }
+
+  private execNotesCommand(cmd: string, val: string | undefined = undefined): void {
+    document.execCommand(cmd, false, val);
+    this.onNotesInput('sidebar');
+  }
+
+  private adjustNotesFontSize(dir: number, target: 'sidebar' | 'modal'): void {
+    const editor = target === 'sidebar' ? this.notesEditorEl : this.modalNotesEditorEl;
+    if (!editor) return;
+    const style = window.getComputedStyle(editor);
+    const curr = parseFloat(style.fontSize) || 14;
+    const next = Math.max(11, Math.min(36, curr + (dir * 2)));
+    editor.style.fontSize = `${next}px`;
+  }
+
+  private onNotesInput(source: 'sidebar' | 'modal'): void {
+    if (this.notesSaveStatusEl) {
+      this.notesSaveStatusEl.textContent = 'Saving...';
+      this.notesSaveStatusEl.classList.add('saving');
+    }
+    if (source === 'sidebar' && this.modalNotesEditorEl) {
+      this.modalNotesEditorEl.innerHTML = this.notesEditorEl.innerHTML;
+    } else if (source === 'modal' && this.notesEditorEl) {
+      this.notesEditorEl.innerHTML = this.modalNotesEditorEl.innerHTML;
+    }
+
+    if (this.notesAutoSaveTimer) clearTimeout(this.notesAutoSaveTimer);
+    this.notesAutoSaveTimer = setTimeout(() => {
+      this.saveNotes();
+    }, 700);
+  }
+
+  toggleNotesModal(force?: boolean): void {
+    const isVisible = !this.notesModalEl.classList.contains('hidden');
+    const target = force !== undefined ? force : !isVisible;
+    if (target) {
+      const slideTitle = this.manifest?.slides[this.currentIndex]?.title || `Slide ${this.currentIndex + 1}`;
+      const subtitleEl = document.getElementById('notes-modal-slide-title');
+      if (subtitleEl) subtitleEl.textContent = `${this.currentIndex + 1}. ${slideTitle}`;
+      if (this.modalNotesEditorEl) {
+        this.modalNotesEditorEl.innerHTML = this.notesEditorEl.innerHTML;
+      }
+      this.notesModalEl.classList.remove('hidden');
+      this.modalNotesEditorEl?.focus();
+    } else {
+      this.notesModalEl.classList.add('hidden');
+      this.saveNotes();
+    }
+  }
+
   private async saveNotes(): Promise<void> {
     if (!this.manifest || !this.manifest.slides[this.currentIndex]) return;
     const cur = this.manifest.slides[this.currentIndex];
-    cur.notes = this.notesEditorEl.value;
+    cur.notes = this.notesEditorEl.innerHTML;
     await window.electronAPI.saveManifest(this.manifest);
     this.syncPresenterState();
+    if (this.notesSaveStatusEl) {
+      this.notesSaveStatusEl.textContent = 'Saved ✓';
+      this.notesSaveStatusEl.classList.remove('saving');
+    }
   }
 
   private async promptNewSlide(): Promise<void> {

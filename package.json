@@ -7,7 +7,7 @@
     "build": "node build.mjs",
     "start": "npm run build && electron . --no-sandbox",
     "dev": "npm run build && electron . --no-sandbox",
-    "test": "npm run build && node test/deck-service.test.mjs && node test/slide-sorter.test.mjs && node test/slide-editor.test.mjs && node test/slide-transitions.test.mjs",
+    "test": "npm run build && node test/deck-service.test.mjs && node test/slide-sorter.test.mjs && node test/slide-editor.test.mjs && node test/slide-transitions.test.mjs && node test/speaker-notes.test.mjs",
     "dist": "npm run build && electron-builder",
     "dist:linux": "npm run build && electron-builder --linux",
     "dist:mac": "npm run build && electron-builder --mac",
