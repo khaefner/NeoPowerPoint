@@ -443,6 +443,18 @@ ipcMain.handle('deck:add-custom-slide', async (_, title: string, htmlContent: st
   return deckService.addCustomSlide(activePath, title, htmlContent, insertAfterIndex);
 });
 
+ipcMain.handle('deck:duplicate-slide', async (_, slideIndex: number) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.duplicateSlide(activePath, slideIndex);
+});
+
+ipcMain.handle('deck:delete-slide', async (_, slideIndex: number) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.deleteSlide(activePath, slideIndex);
+});
+
 // AI Designer Endpoints
 ipcMain.handle('ai:get-settings', async () => {
   return aiService.getSettings();

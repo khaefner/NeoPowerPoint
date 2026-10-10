@@ -6,6 +6,7 @@ export interface SlideMetadata {
   durationSec?: number;   // Recommended duration (in seconds)
   autoAdvanceSec?: number;// Optional auto-advance timer (0 or undefined for manual)
   transition?: 'none' | 'fade' | 'slide-left' | 'zoom';
+  hidden?: boolean;
   hasAnimations?: boolean;
   animationSteps?: number;
 }

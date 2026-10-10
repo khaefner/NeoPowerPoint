@@ -15,6 +15,8 @@ export interface ElectronAPI {
   addNewSlide: (title: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
   addWebSlide: (title: string, url: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
   addCustomSlide: (title: string, htmlContent: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
+  duplicateSlide: (slideIndex: number) => Promise<DeckManifest | null>;
+  deleteSlide: (slideIndex: number) => Promise<DeckManifest | null>;
   aiGetSettings: () => Promise<AISettings>;
   aiSaveSettings: (settings: AISettings) => Promise<boolean>;
   aiGenerateSlide: (req: GenerateSlideRequest) => Promise<GenerateSlideResponse>;
@@ -46,6 +48,8 @@ const api: ElectronAPI = {
   addNewSlide: (title, insertAfterIndex) => ipcRenderer.invoke('deck:add-slide', title, insertAfterIndex),
   addWebSlide: (title, url, insertAfterIndex) => ipcRenderer.invoke('deck:add-web-slide', title, url, insertAfterIndex),
   addCustomSlide: (title, htmlContent, insertAfterIndex) => ipcRenderer.invoke('deck:add-custom-slide', title, htmlContent, insertAfterIndex),
+  duplicateSlide: (slideIndex) => ipcRenderer.invoke('deck:duplicate-slide', slideIndex),
+  deleteSlide: (slideIndex) => ipcRenderer.invoke('deck:delete-slide', slideIndex),
   aiGetSettings: () => ipcRenderer.invoke('ai:get-settings'),
   aiSaveSettings: (settings) => ipcRenderer.invoke('ai:save-settings', settings),
   aiGenerateSlide: (req) => ipcRenderer.invoke('ai:generate-slide', req),

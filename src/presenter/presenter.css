@@ -318,3 +318,7 @@ body, html {
   color: var(--text-primary);
   font-weight: 600;
 }
+.strip-item.is-hidden {
+  opacity: 0.5;
+  border-style: dashed;
+}

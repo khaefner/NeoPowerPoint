@@ -148,11 +148,21 @@ function renderState(state: any) {
   }
 
   const currentSlide = manifest.slides[currentIndex];
-  const nextSlide = manifest.slides[currentIndex + 1] || null;
+  // Next Slide: find next non-hidden slide
+  let nextSlide: any = null;
+  let nextSlideIndex = -1;
+  for (let i = currentIndex + 1; i < manifest.slides.length; i++) {
+    if (!manifest.slides[i].hidden) {
+      nextSlide = manifest.slides[i];
+      nextSlideIndex = i;
+      break;
+    }
+  }
 
   // Current Slide
   if (currentSlide) {
-    currentSlideNameEl.textContent = currentSlide.title || `Slide ${currentIndex + 1}`;
+    const hiddenTag = currentSlide.hidden ? ' (Hidden)' : '';
+    currentSlideNameEl.textContent = (currentSlide.title || `Slide ${currentIndex + 1}`) + hiddenTag;
     const curUrl = `neopres://deck/${currentSlide.path}?view=presenter_cur`;
     if (currentFrameEl.src !== curUrl) {
       currentFrameEl.src = curUrl;
@@ -191,7 +201,7 @@ function renderState(state: any) {
 
   // Next Slide
   if (nextSlide) {
-    nextSlideNameEl.textContent = nextSlide.title || `Slide ${currentIndex + 2}`;
+    nextSlideNameEl.textContent = nextSlide.title || `Slide ${nextSlideIndex + 1}`;
     const nextUrl = `neopres://deck/${nextSlide.path}?view=presenter_next`;
     if (nextFrameEl.src !== nextUrl) {
       nextFrameEl.src = nextUrl;
@@ -210,8 +220,9 @@ function renderState(state: any) {
   slideStripEl.innerHTML = '';
   manifest.slides.forEach((s: any, idx: number) => {
     const item = document.createElement('div');
-    item.className = `strip-item ${idx === currentIndex ? 'active' : ''}`;
-    item.textContent = `${idx + 1}. ${s.title || 'Slide'}`;
+    item.className = `strip-item ${idx === currentIndex ? 'active' : ''} ${s.hidden ? 'is-hidden' : ''}`;
+    item.textContent = `${idx + 1}. ${s.title || 'Slide'}${s.hidden ? ' ⊘' : ''}`;
+    item.title = s.hidden ? 'Hidden Slide' : (s.title || '');
     item.addEventListener('click', () => {
       window.presenterAPI.navigateSlide(idx);
     });

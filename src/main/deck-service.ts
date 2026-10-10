@@ -489,6 +489,62 @@ export class DeckService {
   }
 
   /**
+   * Duplicates an existing slide by creating a physical copy of its slide files and adding it to the manifest.
+   */
+  async duplicateSlide(folderPath: string, slideIndex: number): Promise<DeckManifest> {
+    const manifestPath = path.join(folderPath, 'deck.json');
+    const raw = await fs.promises.readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(raw) as DeckManifest;
+
+    if (slideIndex < 0 || slideIndex >= manifest.slides.length) {
+      throw new Error(`Slide index out of range: ${slideIndex}`);
+    }
+
+    const sourceSlide = manifest.slides[slideIndex];
+    const sourceHtmlPath = path.resolve(folderPath, sourceSlide.path);
+
+    let htmlContent = '';
+    if (fs.existsSync(sourceHtmlPath)) {
+      htmlContent = await fs.promises.readFile(sourceHtmlPath, 'utf-8');
+    }
+
+    const title = `${sourceSlide.title || 'Slide'} (Copy)`;
+    const folderSlug = `${Date.now()}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'slide-copy'}`;
+    const slideDir = path.join(folderPath, 'slides', folderSlug);
+    await fs.promises.mkdir(slideDir, { recursive: true });
+
+    await fs.promises.writeFile(path.join(slideDir, 'index.html'), htmlContent, 'utf-8');
+
+    const newSlide: SlideMetadata = {
+      ...sourceSlide,
+      id: `slide-${Date.now()}`,
+      title,
+      path: path.posix.join('slides', folderSlug, 'index.html'),
+    };
+
+    manifest.slides.splice(slideIndex + 1, 0, newSlide);
+    await this.saveManifest(folderPath, manifest);
+    return manifest;
+  }
+
+  /**
+   * Deletes a slide from the manifest.
+   */
+  async deleteSlide(folderPath: string, slideIndex: number): Promise<DeckManifest> {
+    const manifestPath = path.join(folderPath, 'deck.json');
+    const raw = await fs.promises.readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(raw) as DeckManifest;
+
+    if (slideIndex < 0 || slideIndex >= manifest.slides.length) {
+      throw new Error(`Slide index out of range: ${slideIndex}`);
+    }
+
+    manifest.slides.splice(slideIndex, 1);
+    await this.saveManifest(folderPath, manifest);
+    return manifest;
+  }
+
+  /**
    * Adds an interactive embedded web page slide with scaling and scroll toggle.
    * If insertAfterIndex is provided and >= 0, inserts right after that slide; otherwise appends.
    */

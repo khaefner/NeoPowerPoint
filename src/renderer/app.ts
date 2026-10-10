@@ -60,6 +60,7 @@ class PresentationApp {
   private shortcutsModalEl = document.getElementById('shortcuts-modal')!;
   private overviewCountBadgeEl = document.getElementById('overview-count-badge');
   private editorToolbarEl = document.getElementById('editor-toolbar')!;
+  private sorterContextMenuEl = document.getElementById('sorter-context-menu')!;
 
   // WYSIWYG Editor Selection State
   private currentActiveElement: HTMLElement | null = null;
@@ -69,6 +70,7 @@ class PresentationApp {
   private draggedIndex: number | null = null;
   private sidebarDraggedIndex: number | null = null;
   private selectedOverviewIndex: number = 0;
+  private contextMenuTargetIndex: number = -1;
 
   constructor() {
     this.setupEventListeners();
@@ -209,6 +211,20 @@ class PresentationApp {
     btnSm?.addEventListener('click', () => setSorterSize('sm', '220px'));
     btnMd?.addEventListener('click', () => setSorterSize('md', '300px'));
     btnLg?.addEventListener('click', () => setSorterSize('lg', '420px'));
+
+    // Slide Sorter Context Menu Actions
+    document.getElementById('ctx-move-top')?.addEventListener('click', () => this.handleContextMenuAction('move-top'));
+    document.getElementById('ctx-move-bottom')?.addEventListener('click', () => this.handleContextMenuAction('move-bottom'));
+    document.getElementById('ctx-duplicate')?.addEventListener('click', () => this.handleContextMenuAction('duplicate'));
+    document.getElementById('ctx-toggle-hide')?.addEventListener('click', () => this.handleContextMenuAction('toggle-hide'));
+    document.getElementById('ctx-delete')?.addEventListener('click', () => this.handleContextMenuAction('delete'));
+
+    // Dismiss context menu when clicking anywhere else
+    window.addEventListener('click', (e) => {
+      if (this.sorterContextMenuEl && !this.sorterContextMenuEl.contains(e.target as Node)) {
+        this.hideSorterContextMenu();
+      }
+    });
 
     // Floating Controls
     this.floatPrevBtn.addEventListener('click', () => this.prevSlide());
@@ -599,23 +615,25 @@ class PresentationApp {
 
     this.manifest.slides.forEach((slide, idx) => {
       const item = document.createElement('div');
-      item.className = `slide-item ${idx === this.currentIndex ? 'active' : ''}`;
+      item.className = `slide-item ${idx === this.currentIndex ? 'active' : ''} ${slide.hidden ? 'is-hidden' : ''}`;
       item.dataset.index = String(idx);
       item.setAttribute('draggable', 'true');
 
       const slideUrl = `neopres://deck/${slide.path}`;
+      const hiddenBadge = slide.hidden ? `<span class="slide-item-hidden-badge" title="Hidden slide">Hidden</span>` : '';
 
       item.innerHTML = `
         <div class="slide-item-header">
           <span class="slide-item-num">${idx + 1}</span>
           <span class="slide-item-title" title="${this.escapeHtml(slide.title || 'Slide')}">${this.escapeHtml(slide.title || 'Slide')}</span>
+          ${hiddenBadge}
         </div>
         <div class="slide-item-preview-container">
           <div class="slide-item-preview-placeholder">📽️</div>
           <div class="slide-item-preview-scaler">
             <iframe class="slide-item-preview-frame" src="${slideUrl}" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1" allow="autoplay 'none'"></iframe>
           </div>
-          <div class="slide-item-preview-overlay" title="Slide ${idx + 1}: ${this.escapeHtml(slide.title || 'Slide')}"></div>
+          <div class="slide-item-preview-overlay" title="Slide ${idx + 1}: ${this.escapeHtml(slide.title || 'Slide')}${slide.hidden ? ' (Hidden)' : ''}"></div>
         </div>
       `;
 
@@ -893,8 +911,19 @@ class PresentationApp {
       } catch (_) {}
     }
 
-    if (this.currentIndex < this.manifest.slides.length - 1) {
-      this.goToSlide(this.currentIndex + 1);
+    if (this.isPresentationMode) {
+      // In presentation mode, skip hidden slides
+      let nextIdx = this.currentIndex + 1;
+      while (nextIdx < this.manifest.slides.length && this.manifest.slides[nextIdx].hidden) {
+        nextIdx++;
+      }
+      if (nextIdx < this.manifest.slides.length) {
+        this.goToSlide(nextIdx);
+      }
+    } else {
+      if (this.currentIndex < this.manifest.slides.length - 1) {
+        this.goToSlide(this.currentIndex + 1);
+      }
     }
   }
 
@@ -912,8 +941,19 @@ class PresentationApp {
       } catch (_) {}
     }
 
-    if (this.currentIndex > 0) {
-      this.goToSlide(this.currentIndex - 1, false, true);
+    if (this.isPresentationMode) {
+      // In presentation mode, skip hidden slides backwards
+      let prevIdx = this.currentIndex - 1;
+      while (prevIdx >= 0 && this.manifest.slides[prevIdx].hidden) {
+        prevIdx--;
+      }
+      if (prevIdx >= 0) {
+        this.goToSlide(prevIdx, false, true);
+      }
+    } else {
+      if (this.currentIndex > 0) {
+        this.goToSlide(this.currentIndex - 1, false, true);
+      }
     }
   }
 
@@ -1395,6 +1435,7 @@ class PresentationApp {
         requestAnimationFrame(() => this.updateOverviewScales());
       });
     } else {
+      this.hideSorterContextMenu();
       this.overviewModalEl.classList.add('hidden');
       // Clean up iframes to release background CPU / GPU while presenting
       this.overviewGridEl.innerHTML = '';
@@ -1418,13 +1459,17 @@ class PresentationApp {
 
     this.manifest.slides.forEach((slide, idx) => {
       const card = document.createElement('div');
-      card.className = `overview-card ${idx === this.selectedOverviewIndex ? 'active' : ''}`;
+      card.className = `overview-card ${idx === this.selectedOverviewIndex ? 'active' : ''} ${slide.hidden ? 'is-hidden' : ''}`;
       card.dataset.index = String(idx);
       card.setAttribute('draggable', 'true');
 
       // Notes badge if notes exist
       const notesBadge = slide.notes && slide.notes.trim()
         ? `<span class="card-badge-notes" title="Speaker Notes: ${this.escapeHtml(slide.notes.slice(0, 120))}${slide.notes.length > 120 ? '...' : ''}">📝</span>`
+        : '';
+
+      const hiddenBadge = slide.hidden
+        ? `<span class="card-badge-hidden" title="Hidden Slide: skipped during presentations">Hidden</span>`
         : '';
 
       const activeBadge = idx === this.currentIndex
@@ -1439,7 +1484,7 @@ class PresentationApp {
           <div class="card-preview-scaler">
             <iframe class="card-preview-frame" src="${slideUrl}" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1" allow="autoplay 'none'"></iframe>
           </div>
-          <div class="card-preview-overlay" title="Slide ${idx + 1}: ${this.escapeHtml(slide.title || 'Slide')}"></div>
+          <div class="card-preview-overlay" title="Slide ${idx + 1}: ${this.escapeHtml(slide.title || 'Slide')}${slide.hidden ? ' (Hidden)' : ''} • Right-click for options"></div>
         </div>
         <div class="card-footer">
           <div class="card-meta">
@@ -1448,6 +1493,7 @@ class PresentationApp {
           </div>
           <div class="card-badges">
             ${notesBadge}
+            ${hiddenBadge}
             ${activeBadge}
           </div>
         </div>
@@ -1475,6 +1521,13 @@ class PresentationApp {
       card.addEventListener('click', () => {
         this.goToSlide(idx);
         this.toggleOverview(false);
+      });
+
+      // Right-click context menu
+      card.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.showSorterContextMenu(idx, e.clientX, e.clientY);
       });
 
       // Drag and drop reordering
@@ -1562,6 +1615,88 @@ class PresentationApp {
     this.renderSidebarSlides();
     this.renderOverviewGrid();
     this.syncPresenterState();
+  }
+
+  private showSorterContextMenu(slideIndex: number, x: number, y: number): void {
+    if (!this.manifest || slideIndex < 0 || slideIndex >= this.manifest.slides.length) return;
+    this.contextMenuTargetIndex = slideIndex;
+
+    const slide = this.manifest.slides[slideIndex];
+    const hideLabel = document.getElementById('ctx-toggle-hide-label');
+    if (hideLabel) {
+      hideLabel.textContent = slide.hidden ? 'Unhide Slide' : 'Hide Slide';
+    }
+
+    if (this.sorterContextMenuEl) {
+      this.sorterContextMenuEl.classList.remove('hidden');
+
+      // Boundary check to keep inside viewport
+      const menuW = 190;
+      const menuH = 180;
+      const posX = (x + menuW > window.innerWidth) ? (x - menuW) : x;
+      const posY = (y + menuH > window.innerHeight) ? (y - menuH) : y;
+
+      this.sorterContextMenuEl.style.left = `${posX}px`;
+      this.sorterContextMenuEl.style.top = `${posY}px`;
+    }
+  }
+
+  private hideSorterContextMenu(): void {
+    if (this.sorterContextMenuEl) {
+      this.sorterContextMenuEl.classList.add('hidden');
+    }
+    this.contextMenuTargetIndex = -1;
+  }
+
+  private async handleContextMenuAction(action: 'move-top' | 'move-bottom' | 'duplicate' | 'toggle-hide' | 'delete'): Promise<void> {
+    const targetIdx = this.contextMenuTargetIndex;
+    this.hideSorterContextMenu();
+
+    if (!this.manifest || targetIdx < 0 || targetIdx >= this.manifest.slides.length) return;
+
+    if (action === 'move-top') {
+      if (targetIdx > 0) {
+        await this.reorderSlides(targetIdx, 0);
+      }
+    } else if (action === 'move-bottom') {
+      if (targetIdx < this.manifest.slides.length - 1) {
+        await this.reorderSlides(targetIdx, this.manifest.slides.length - 1);
+      }
+    } else if (action === 'duplicate') {
+      const updatedManifest = await window.electronAPI.duplicateSlide(targetIdx);
+      if (updatedManifest) {
+        this.manifest = updatedManifest;
+        this.renderSidebarSlides();
+        this.renderOverviewGrid();
+        this.syncPresenterState();
+      }
+    } else if (action === 'toggle-hide') {
+      const slide = this.manifest.slides[targetIdx];
+      slide.hidden = !slide.hidden;
+      await window.electronAPI.saveManifest(this.manifest);
+      this.renderSidebarSlides();
+      this.renderOverviewGrid();
+      this.syncPresenterState();
+    } else if (action === 'delete') {
+      if (this.manifest.slides.length <= 1) {
+        alert('Cannot delete the only slide in the presentation.');
+        return;
+      }
+      const title = this.manifest.slides[targetIdx].title || `Slide ${targetIdx + 1}`;
+      const confirmed = confirm(`Are you sure you want to delete "${title}"?`);
+      if (!confirmed) return;
+
+      const updatedManifest = await window.electronAPI.deleteSlide(targetIdx);
+      if (updatedManifest) {
+        this.manifest = updatedManifest;
+        if (this.currentIndex >= this.manifest.slides.length) {
+          this.currentIndex = this.manifest.slides.length - 1;
+        }
+        this.renderSidebarSlides();
+        this.renderOverviewGrid();
+        this.goToSlide(this.currentIndex);
+      }
+    }
   }
 
   private highlightOverviewCard(index: number): void {
