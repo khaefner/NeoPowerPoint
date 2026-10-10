@@ -219,9 +219,21 @@ class PresentationApp {
     document.getElementById('ctx-toggle-hide')?.addEventListener('click', () => this.handleContextMenuAction('toggle-hide'));
     document.getElementById('ctx-delete')?.addEventListener('click', () => this.handleContextMenuAction('delete'));
 
-    // Dismiss context menu when clicking anywhere else
-    window.addEventListener('click', (e) => {
-      if (this.sorterContextMenuEl && !this.sorterContextMenuEl.contains(e.target as Node)) {
+    // Dismiss context menu when clicking outside (primary click) or pressing Escape
+    window.addEventListener('pointerdown', (e) => {
+      // Only dismiss on primary click (button 0), never on right-click (button 2)
+      if (e.button !== 0) return;
+      if (this.sorterContextMenuEl && !this.sorterContextMenuEl.classList.contains('hidden')) {
+        if (!this.sorterContextMenuEl.contains(e.target as Node)) {
+          this.hideSorterContextMenu();
+        }
+      }
+    });
+
+    window.addEventListener('contextmenu', (e) => {
+      // If right clicking outside a slide item or overview card, hide the menu
+      const target = e.target as HTMLElement;
+      if (!target.closest('.overview-card') && !target.closest('.slide-item') && !target.closest('.sorter-context-menu')) {
         this.hideSorterContextMenu();
       }
     });
@@ -537,7 +549,9 @@ class PresentationApp {
       e.preventDefault();
       this.toggleShortcuts();
     } else if (e.key === 'Escape') {
-      if (!this.notesModalEl.classList.contains('hidden')) {
+      if (this.sorterContextMenuEl && !this.sorterContextMenuEl.classList.contains('hidden')) {
+        this.hideSorterContextMenu();
+      } else if (!this.notesModalEl.classList.contains('hidden')) {
         this.toggleNotesModal(false);
       } else if (!this.overviewModalEl.classList.contains('hidden')) {
         this.toggleOverview(false);
@@ -656,6 +670,11 @@ class PresentationApp {
       }
 
       item.addEventListener('click', () => this.goToSlide(idx));
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.showSorterContextMenu(idx, e.clientX, e.clientY);
+      });
       this.setupSidebarDragAndDrop(item, idx);
 
       this.slidesListEl.appendChild(item);
