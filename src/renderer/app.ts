@@ -1,5 +1,7 @@
 import { DeckManifest, SlideMetadata } from '../types/deck';
 import { ElectronAPI } from '../preload/preload';
+import { InkOverlay } from '../common/ink-overlay';
+import { InkSyncAction } from '../types/ink';
 
 declare const window: Window & { electronAPI: ElectronAPI };
 
@@ -13,6 +15,7 @@ class PresentationApp {
   private floatingControlsTimer: any = null;
   private currentAnimStep: number = 0;
   private totalAnimSteps: number = 0;
+  private inkOverlay: InkOverlay | null = null;
 
   // DOM Elements
   private emptyStateEl = document.getElementById('empty-state')!;
@@ -81,6 +84,11 @@ class PresentationApp {
     this.setupSidebarScaler();
     this.setupIPCListeners();
     this.setupIframeMessageBridge();
+
+    this.inkOverlay = new InkOverlay({
+      container: this.slideBoxEl,
+      isInteractive: false,
+    });
   }
 
   private setupEventListeners(): void {
@@ -396,6 +404,38 @@ class PresentationApp {
       }
       window.dispatchEvent(new Event('resize'));
     });
+
+    window.electronAPI.onInkAction?.((action: any) => {
+      if (!this.inkOverlay) return;
+      switch (action.type) {
+        case 'ink:sync-slide':
+          if (action.slideIndex === this.currentIndex) {
+            this.inkOverlay.setSlideIndex(action.slideIndex, action.strokes);
+          }
+          break;
+        case 'ink:stroke-start':
+          if (action.stroke.slideIndex === this.currentIndex) {
+            this.inkOverlay.startStroke(action.stroke);
+          }
+          break;
+        case 'ink:stroke-update':
+          this.inkOverlay.updateStroke(action.id, action.points);
+          break;
+        case 'ink:stroke-end':
+          this.inkOverlay.endStroke(action.id);
+          break;
+        case 'ink:undo':
+          if (action.slideIndex === this.currentIndex) {
+            this.inkOverlay.undo();
+          }
+          break;
+        case 'ink:clear':
+          if (action.slideIndex === this.currentIndex) {
+            this.inkOverlay.clear();
+          }
+          break;
+      }
+    });
   }
 
   private setupIframeMessageBridge(): void {
@@ -613,6 +653,8 @@ class PresentationApp {
     const labelToggle = document.getElementById('label-toggle-edit');
     if (labelToggle) labelToggle.textContent = 'Test Scripts';
 
+    this.inkOverlay?.clear();
+
     this.renderSidebarSlides();
     this.goToSlide(0);
   }
@@ -763,6 +805,7 @@ class PresentationApp {
 
     // Synchronize to Presenter View
     this.syncPresenterState();
+    this.inkOverlay?.setSlideIndex(this.currentIndex);
 
     const slideUrl = `neopres://deck/${currentSlide.path}`;
     const seq = ++this.navSequence;

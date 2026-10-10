@@ -33,6 +33,10 @@ export interface ElectronAPI {
   onOpenPresenterEvent: (callback: () => void) => () => void;
   onReloadSlideEvent: (callback: () => void) => () => void;
   onSetPresentationModeEvent: (callback: (enabled: boolean) => void) => () => void;
+  onInkAction: (callback: (action: any) => void) => () => void;
+  sendInkAction: (action: any) => void;
+  getAdbStatus: () => Promise<any>;
+  launchTabletBrowser: () => Promise<{ success: boolean; error?: string }>;
 }
 
 const api: ElectronAPI = {
@@ -105,7 +109,16 @@ const api: ElectronAPI = {
     const handler = (_: any, enabled: boolean) => callback(enabled);
     ipcRenderer.on('deck:set-presentation-mode', handler);
     return () => ipcRenderer.removeListener('deck:set-presentation-mode', handler);
-  }
+  },
+
+  onInkAction: (callback) => {
+    const handler = (_: any, action: any) => callback(action);
+    ipcRenderer.on('ink:action', handler);
+    return () => ipcRenderer.removeListener('ink:action', handler);
+  },
+  sendInkAction: (action) => ipcRenderer.send('ink:host-action', action),
+  getAdbStatus: () => ipcRenderer.invoke('adb:get-status'),
+  launchTabletBrowser: () => ipcRenderer.invoke('adb:launch-tablet'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

@@ -7,6 +7,10 @@ import { registerCustomProtocolScheme, setupCustomProtocolHandler } from './prot
 import { DeckManifest } from '../types/deck';
 import { AIService } from './ai-service';
 import { AISettings, GenerateSlideRequest } from '../types/ai';
+import { ADBService } from './adb-service';
+import { SyncServer } from './sync-server';
+import { InkStore } from './ink-store';
+import { InkSyncAction } from '../types/ink';
 
 // Append no-sandbox if needed in Linux environments
 app.commandLine.appendSwitch('no-sandbox');
@@ -19,6 +23,56 @@ let latestPresenterState: any = null;
 
 const deckService = new DeckService();
 const aiService = new AIService();
+const inkStore = new InkStore();
+const syncServer = new SyncServer(deckService, inkStore, 8765);
+const adbService = new ADBService(8765);
+
+function broadcastToWindows(channel: string, data: any): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, data);
+  }
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send(channel, data);
+  }
+}
+
+// Wire SyncServer and ADBService events
+adbService.on('devices-changed', (devices) => {
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('adb:devices-changed', devices);
+  }
+});
+
+syncServer.on('slide:navigate', (target) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('slide:navigate', target);
+  }
+});
+
+syncServer.on('ink:stroke-start', (stroke) => {
+  broadcastToWindows('ink:action', { type: 'ink:stroke-start', stroke });
+});
+
+syncServer.on('ink:stroke-update', (id, points) => {
+  broadcastToWindows('ink:action', { type: 'ink:stroke-update', id, points });
+});
+
+syncServer.on('ink:stroke-end', (id) => {
+  broadcastToWindows('ink:action', { type: 'ink:stroke-end', id });
+});
+
+syncServer.on('ink:undo', (slideIndex) => {
+  broadcastToWindows('ink:action', { type: 'ink:undo', slideIndex });
+});
+
+syncServer.on('ink:clear', (slideIndex) => {
+  broadcastToWindows('ink:action', { type: 'ink:clear', slideIndex });
+});
+
+syncServer.on('ink:sync-slide', (slideIndex, strokes) => {
+  broadcastToWindows('ink:action', { type: 'ink:sync-slide', slideIndex, strokes });
+});
+
 const deckWatcher = new DeckWatcher((filePath, eventType) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('deck:file-changed', { filePath, eventType });
@@ -111,6 +165,16 @@ function openPresenterWindow(): boolean {
   presenterWindow.webContents.on('did-finish-load', () => {
     if (latestPresenterState && presenterWindow && !presenterWindow.isDestroyed()) {
       presenterWindow.webContents.send('presenter:state-update', latestPresenterState);
+      const currentIndex = latestPresenterState.currentIndex || 0;
+      const strokes = inkStore.getStrokes(currentIndex);
+      presenterWindow.webContents.send('ink:action', {
+        type: 'ink:sync-slide',
+        slideIndex: currentIndex,
+        strokes
+      });
+    }
+    if (presenterWindow && !presenterWindow.isDestroyed()) {
+      presenterWindow.webContents.send('adb:devices-changed', adbService.getStatus().devices);
     }
   });
 
@@ -284,6 +348,7 @@ async function handleOpenFolder() {
 
   const folderPath = result.filePaths[0];
   const deckData = await deckService.openFolder(folderPath);
+  inkStore.resetAll();
   deckWatcher.watch(folderPath);
   return deckData;
 }
@@ -305,6 +370,7 @@ async function handleOpenPackage() {
 
   const packagePath = result.filePaths[0];
   const deckData = await deckService.openPackage(packagePath);
+  inkStore.resetAll();
   deckWatcher.watch(deckData.deckPath);
   return deckData;
 }
@@ -351,6 +417,7 @@ async function handleCreateDeck() {
 
   const folderPath = result.filePaths[0];
   const deckData = await deckService.createNewDeck(folderPath, path.basename(folderPath));
+  inkStore.resetAll();
   deckWatcher.watch(folderPath);
   return deckData;
 }
@@ -372,6 +439,7 @@ async function handleImportPptx() {
 
   const pptxPath = result.filePaths[0];
   const deckData = await deckService.importPptx(pptxPath);
+  inkStore.resetAll();
   deckWatcher.watch(deckData.deckPath);
   return deckData;
 }
@@ -387,6 +455,7 @@ ipcMain.handle('deck:load-sample', async () => {
   const sampleDir = path.join(__dirname, '../../sample-deck');
   if (fs.existsSync(sampleDir)) {
     const deckData = await deckService.openFolder(sampleDir);
+    inkStore.resetAll();
     deckWatcher.watch(sampleDir);
     return deckData;
   }
@@ -504,6 +573,34 @@ ipcMain.on('presenter:sync-state', (_, state) => {
   if (presenterWindow && !presenterWindow.isDestroyed()) {
     presenterWindow.webContents.send('presenter:state-update', state);
   }
+  syncServer.updateSlideState(state);
+});
+
+ipcMain.on('ink:host-action', (event, action: InkSyncAction) => {
+  syncServer.broadcastHostInkAction(action);
+  // Relay action to the opposite window
+  if (mainWindow && event.sender === mainWindow.webContents) {
+    if (presenterWindow && !presenterWindow.isDestroyed()) {
+      presenterWindow.webContents.send('ink:action', action);
+    }
+  } else if (presenterWindow && event.sender === presenterWindow.webContents) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('ink:action', action);
+    }
+  }
+});
+
+// ADB IPC Handlers
+ipcMain.handle('adb:get-status', async () => {
+  return adbService.getStatus();
+});
+
+ipcMain.handle('adb:setup-reverse', async (_, deviceId?: string) => {
+  return adbService.setupReverse(deviceId);
+});
+
+ipcMain.handle('adb:launch-tablet', async (_, deviceId?: string) => {
+  return adbService.launchTabletBrowser(deviceId);
 });
 
 ipcMain.on('presenter:navigate', (_, index: number) => {
@@ -525,8 +622,14 @@ ipcMain.on('presenter:prev', () => {
 });
 
 // App Lifecycle
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   setupCustomProtocolHandler(deckService);
+  try {
+    await syncServer.start();
+    adbService.startMonitoring(3000);
+  } catch (err: any) {
+    console.warn('[MAIN] Error starting sync server or ADB service:', err.message);
+  }
   createMainWindow();
 
   app.on('activate', () => {
@@ -537,6 +640,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  adbService.stopMonitoring();
+  syncServer.stop();
   if (process.platform !== 'darwin') {
     app.quit();
   }

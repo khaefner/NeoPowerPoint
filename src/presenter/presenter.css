@@ -109,6 +109,72 @@ body, html {
   color: var(--text-muted);
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* ADB Tablet Pill */
+.adb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.82rem;
+}
+
+.adb-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+}
+
+.adb-dot.connected {
+  background: var(--accent-green);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
+}
+
+.adb-dot.disconnected {
+  background: #ef4444;
+}
+
+.adb-label {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.adb-launch-btn {
+  background: var(--border);
+  color: var(--text-primary);
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.adb-launch-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.panel-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.panel-ink-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* Grid layout */
 .presenter-grid {
   flex: 1;

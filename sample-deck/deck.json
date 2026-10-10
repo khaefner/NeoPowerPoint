@@ -25,6 +25,13 @@
       "transition": "fade"
     },
     {
+      "id": "slide-1791642959777",
+      "title": "Interactive Simulation",
+      "path": "slides/1791642959772-interactive-simulation/index.html",
+      "notes": "Embedded interactive webpage: https://gaia.cs.umass.edu/kurose_ross/interactive/end-end-throughput-simple.php",
+      "transition": "fade"
+    },
+    {
       "id": "slide-3",
       "title": "3D Canvas Particle Physics",
       "path": "slides/03-particle-physics/index.html",

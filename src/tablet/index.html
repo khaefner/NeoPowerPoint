@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>NeoPowerPoint Tablet Inking</title>
+  <link rel="manifest" href="/tablet/manifest.json">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="/tablet/tablet.css">
+</head>
+<body>
+  <div id="tablet-app">
+    <!-- Top Status Header -->
+    <header id="top-bar">
+      <div class="bar-left">
+        <span id="deck-title" class="deck-name">Loading...</span>
+        <span id="slide-counter" class="slide-counter">0 / 0</span>
+      </div>
+      <div class="bar-right">
+        <button id="btn-max-slide" class="t-btn btn-compact" title="Maximize Slide Area (Hide Header)">
+          🗖 Max
+        </button>
+        <button id="btn-fullscreen" class="t-btn btn-compact" title="Toggle Fullscreen Display">
+          ⛶ Fullscreen
+        </button>
+        <div class="status-indicator">
+          <span id="status-dot" class="status-dot disconnected"></span>
+          <span id="status-text">Connecting...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Slide Viewport Container (Aspect Ratio Scaled) -->
+    <main id="viewport-container">
+      <div id="slide-scaler">
+        <iframe id="slide-frame" src="about:blank"></iframe>
+        <canvas id="ink-canvas"></canvas>
+      </div>
+    </main>
+
+    <!-- Floating un-collapse trigger when header is hidden in Max mode -->
+    <button id="btn-restore-header" class="btn-restore-header hidden" title="Restore Top Header">▾</button>
+
+    <!-- Bottom Inking & Navigation Toolbar -->
+    <footer id="toolbar">
+      <!-- Navigation Group -->
+      <div class="toolbar-group">
+        <button id="btn-prev" class="t-btn" title="Previous Slide">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <button id="btn-next" class="t-btn" title="Next Slide">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+
+      <!-- Tools Group -->
+      <div class="toolbar-group">
+        <button id="tool-pen" class="t-btn active" title="Pen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/></svg>
+          Pen
+        </button>
+        <button id="tool-highlighter" class="t-btn" title="Highlighter">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2l4 4L7 17H3v-4L14 2z"/><path d="M3 22h18"/></svg>
+          Highlight
+        </button>
+        <button id="tool-eraser" class="t-btn" title="Eraser">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L18 15L21 18L20 20Z"/></svg>
+          Eraser
+        </button>
+      </div>
+
+      <!-- Colors -->
+      <div id="color-palette" class="color-picker">
+        <div class="color-dot active" data-color="#ef4444" style="background-color: #ef4444;" title="Red"></div>
+        <div class="color-dot" data-color="#3b82f6" style="background-color: #3b82f6;" title="Blue"></div>
+        <div class="color-dot" data-color="#22c55e" style="background-color: #22c55e;" title="Green"></div>
+        <div class="color-dot" data-color="#eab308" style="background-color: #eab308;" title="Yellow"></div>
+        <div class="color-dot" data-color="#000000" style="background-color: #000000;" title="Black"></div>
+        <div class="color-dot" data-color="#ffffff" style="background-color: #ffffff;" title="White"></div>
+      </div>
+
+      <!-- Size -->
+      <div class="toolbar-group">
+        <button class="t-btn stroke-size-btn" data-size="2" title="Fine Stroke">Fine</button>
+        <button class="t-btn stroke-size-btn active" data-size="4" title="Medium Stroke">Med</button>
+        <button class="t-btn stroke-size-btn" data-size="8" title="Thick Stroke">Thick</button>
+      </div>
+
+      <!-- Actions -->
+      <div class="toolbar-group">
+        <button id="btn-undo" class="t-btn" title="Undo Stroke">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        </button>
+        <button id="btn-clear" class="t-btn" title="Clear Slide Ink">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="/tablet/tablet.js"></script>
+</body>
+</html>

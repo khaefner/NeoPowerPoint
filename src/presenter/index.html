@@ -33,6 +33,12 @@
       </div>
 
       <div class="header-right">
+        <!-- ADB Boox Tablet Badge -->
+        <div class="adb-pill" id="adb-pill" title="Android Boox Tablet Status">
+          <span class="adb-dot disconnected" id="adb-dot"></span>
+          <span class="adb-label" id="adb-label">Boox: Disconnected</span>
+          <button id="btn-adb-launch" class="btn-micro adb-launch-btn" title="Launch companion inking view on connected tablet" disabled>Open on Boox</button>
+        </div>
         <span id="p-slide-counter" class="slide-indicator">Slide 1 of 1</span>
       </div>
     </header>
@@ -42,8 +48,14 @@
       <!-- Left: Current Slide Live Preview -->
       <section class="panel current-slide-panel">
         <div class="panel-header">
-          <span class="panel-badge">CURRENT SLIDE</span>
-          <span id="current-slide-name" class="panel-subtext">Slide Title</span>
+          <div class="panel-title-group">
+            <span class="panel-badge">CURRENT SLIDE</span>
+            <span id="current-slide-name" class="panel-subtext">Slide Title</span>
+          </div>
+          <div class="panel-ink-tools">
+            <button id="btn-p-ink-undo" class="btn-micro" title="Undo Ink Stroke">↩ Undo</button>
+            <button id="btn-p-ink-clear" class="btn-micro" title="Clear Slide Ink">🗑 Clear Ink</button>
+          </div>
         </div>
         <div class="preview-viewport" id="current-viewport">
           <div class="preview-scaler" id="current-scaler">

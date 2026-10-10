@@ -1,3 +1,6 @@
+import { InkOverlay } from '../common/ink-overlay';
+import { InkSyncAction } from '../types/ink';
+
 declare global {
   interface Window {
     presenterAPI: {
@@ -5,6 +8,11 @@ declare global {
       navigateSlide: (index: number) => void;
       nextSlide: () => void;
       prevSlide: () => void;
+      onInkAction: (callback: (action: InkSyncAction) => void) => () => void;
+      sendInkAction: (action: InkSyncAction) => void;
+      getAdbStatus: () => Promise<any>;
+      launchTabletBrowser: () => Promise<{ success: boolean; error?: string }>;
+      onAdbDevicesChanged: (callback: (devices: any[]) => void) => () => void;
     };
   }
 }
@@ -42,6 +50,21 @@ const btnNotesLarger = document.getElementById('btn-notes-larger')!;
 const btnPrev = document.getElementById('btn-p-prev')!;
 const btnNext = document.getElementById('btn-p-next')!;
 const slideStripEl = document.getElementById('slide-strip')!;
+
+// ADB Elements
+const adbDotEl = document.getElementById('adb-dot')!;
+const adbLabelEl = document.getElementById('adb-label')!;
+const btnAdbLaunch = document.getElementById('btn-adb-launch') as HTMLButtonElement;
+
+// Ink Elements
+const btnInkUndo = document.getElementById('btn-p-ink-undo');
+const btnInkClear = document.getElementById('btn-p-ink-clear');
+
+// Setup Ink Overlay on current slide preview
+const inkOverlay = new InkOverlay({
+  container: currentScalerEl,
+  isInteractive: false,
+});
 
 // Wall Clock
 function updateClock() {
@@ -197,6 +220,9 @@ function renderState(state: any) {
     } else {
       notesContentEl.innerHTML = '<p class="notes-placeholder">No speaker notes for this slide.</p>';
     }
+
+    // Set active slide index for ink overlay
+    inkOverlay.setSlideIndex(currentIndex);
   }
 
   // Next Slide
@@ -229,3 +255,87 @@ function renderState(state: any) {
     slideStripEl.appendChild(item);
   });
 }
+
+// Inking Actions
+btnInkUndo?.addEventListener('click', () => {
+  if (currentState && typeof currentState.currentIndex === 'number') {
+    window.presenterAPI.sendInkAction({
+      type: 'ink:undo',
+      slideIndex: currentState.currentIndex
+    });
+  }
+});
+
+btnInkClear?.addEventListener('click', () => {
+  if (currentState && typeof currentState.currentIndex === 'number') {
+    window.presenterAPI.sendInkAction({
+      type: 'ink:clear',
+      slideIndex: currentState.currentIndex
+    });
+  }
+});
+
+window.presenterAPI.onInkAction((action: InkSyncAction) => {
+  switch (action.type) {
+    case 'ink:sync-slide':
+      if (currentState && action.slideIndex === currentState.currentIndex) {
+        inkOverlay.setSlideIndex(action.slideIndex, action.strokes);
+      }
+      break;
+    case 'ink:stroke-start':
+      if (currentState && action.stroke.slideIndex === currentState.currentIndex) {
+        inkOverlay.startStroke(action.stroke);
+      }
+      break;
+    case 'ink:stroke-update':
+      inkOverlay.updateStroke(action.id, action.points);
+      break;
+    case 'ink:stroke-end':
+      inkOverlay.endStroke(action.id);
+      break;
+    case 'ink:undo':
+      if (currentState && action.slideIndex === currentState.currentIndex) {
+        inkOverlay.undo();
+      }
+      break;
+    case 'ink:clear':
+      if (currentState && action.slideIndex === currentState.currentIndex) {
+        inkOverlay.clear();
+      }
+      break;
+  }
+});
+
+// ADB Status Handling
+function updateAdbUi(devices: any[]) {
+  const activeDevice = devices?.find((d: any) => d.state === 'device');
+  if (activeDevice) {
+    adbDotEl.className = 'adb-dot connected';
+    adbLabelEl.textContent = `Boox: ${activeDevice.model || 'Connected'}`;
+    btnAdbLaunch.disabled = false;
+  } else {
+    adbDotEl.className = 'adb-dot disconnected';
+    adbLabelEl.textContent = 'Boox: Disconnected';
+    btnAdbLaunch.disabled = true;
+  }
+}
+
+window.presenterAPI.getAdbStatus().then((status) => {
+  updateAdbUi(status?.devices || []);
+}).catch(() => {});
+
+window.presenterAPI.onAdbDevicesChanged((devices) => {
+  updateAdbUi(devices);
+});
+
+btnAdbLaunch.addEventListener('click', async () => {
+  btnAdbLaunch.textContent = 'Launching...';
+  const res = await window.presenterAPI.launchTabletBrowser();
+  if (res.success) {
+    btnAdbLaunch.textContent = 'Launched! ✓';
+    setTimeout(() => { btnAdbLaunch.textContent = 'Open on Boox'; }, 2500);
+  } else {
+    btnAdbLaunch.textContent = 'Launch Failed';
+    setTimeout(() => { btnAdbLaunch.textContent = 'Open on Boox'; }, 2500);
+  }
+});
