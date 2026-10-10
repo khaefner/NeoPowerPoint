@@ -168,6 +168,29 @@ class PresentationApp {
     document.getElementById('btn-cancel-web-modal')?.addEventListener('click', () => this.closeWebSlideModal());
     document.getElementById('btn-confirm-web-modal')?.addEventListener('click', () => this.submitWebSlideModal());
 
+    // AI Designer
+    document.getElementById('btn-ai-designer')?.addEventListener('click', () => this.openAIDesignerModal());
+    document.getElementById('menu-ai-designer')?.addEventListener('click', () => this.openAIDesignerModal());
+    document.getElementById('btn-close-ai-modal')?.addEventListener('click', () => this.closeAIDesignerModal());
+    document.getElementById('btn-cancel-ai-modal')?.addEventListener('click', () => this.closeAIDesignerModal());
+    document.getElementById('btn-generate-ai-slide')?.addEventListener('click', () => this.generateAISlide());
+    document.getElementById('tab-ai-prompt')?.addEventListener('click', () => this.switchAITab('prompt'));
+    document.getElementById('tab-ai-settings')?.addEventListener('click', () => this.switchAITab('settings'));
+    document.getElementById('btn-save-ai-settings')?.addEventListener('click', () => this.saveAISettings());
+    document.getElementById('select-ai-provider')?.addEventListener('change', (e) => {
+      this.updateAIProviderUI((e.target as HTMLSelectElement).value);
+    });
+    document.querySelectorAll('.ai-preset-chip').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const text = (e.currentTarget as HTMLElement).dataset.preset || '';
+        const promptInput = document.getElementById('input-ai-prompt-text') as HTMLTextAreaElement;
+        if (promptInput) {
+          promptInput.value = text;
+          promptInput.focus();
+        }
+      });
+    });
+
     // Slide Sorter thumbnail size controls
     const btnSm = document.getElementById('btn-sorter-size-sm');
     const btnMd = document.getElementById('btn-sorter-size-md');
@@ -1127,6 +1150,178 @@ class PresentationApp {
       this.manifest = updatedManifest;
       this.renderSidebarSlides();
       this.goToSlide(targetIndex);
+    }
+  }
+
+  private async openAIDesignerModal(): Promise<void> {
+    if (!this.deckPath) {
+      alert('Please open or create a presentation first.');
+      return;
+    }
+    const modal = document.getElementById('ai-designer-modal');
+    if (modal) {
+      modal.classList.remove('hidden');
+      this.switchAITab('prompt');
+      await this.loadAISettingsToUI();
+      const promptInput = document.getElementById('input-ai-prompt-text') as HTMLTextAreaElement;
+      if (promptInput) {
+        promptInput.focus();
+      }
+    }
+  }
+
+  private closeAIDesignerModal(): void {
+    const modal = document.getElementById('ai-designer-modal');
+    if (modal) {
+      modal.classList.add('hidden');
+    }
+  }
+
+  private switchAITab(tab: 'prompt' | 'settings'): void {
+    const tabPrompt = document.getElementById('tab-ai-prompt');
+    const tabSettings = document.getElementById('tab-ai-settings');
+    const secPrompt = document.getElementById('ai-section-prompt');
+    const secSettings = document.getElementById('ai-section-settings');
+
+    if (tab === 'prompt') {
+      secPrompt?.classList.remove('hidden');
+      secSettings?.classList.add('hidden');
+      tabPrompt?.style.setProperty('color', 'var(--accent-primary)');
+      tabPrompt?.style.setProperty('border-bottom', '2px solid var(--accent-primary)');
+      tabSettings?.style.setProperty('color', 'var(--text-muted)');
+      tabSettings?.style.setProperty('border-bottom', '2px solid transparent');
+    } else {
+      secPrompt?.classList.add('hidden');
+      secSettings?.classList.remove('hidden');
+      tabSettings?.style.setProperty('color', 'var(--accent-primary)');
+      tabSettings?.style.setProperty('border-bottom', '2px solid var(--accent-primary)');
+      tabPrompt?.style.setProperty('color', 'var(--text-muted)');
+      tabPrompt?.style.setProperty('border-bottom', '2px solid transparent');
+    }
+  }
+
+  private updateAIProviderUI(provider: string): void {
+    const grpAntigravity = document.getElementById('group-ai-antigravity');
+    const grpOpenAI = document.getElementById('group-ai-openai');
+    const grpAnthropic = document.getElementById('group-ai-anthropic');
+
+    grpAntigravity?.classList.toggle('hidden', provider !== 'antigravity');
+    grpOpenAI?.classList.toggle('hidden', provider !== 'openai');
+    grpAnthropic?.classList.toggle('hidden', provider !== 'anthropic');
+  }
+
+  private async loadAISettingsToUI(): Promise<void> {
+    try {
+      const settings = await window.electronAPI.aiGetSettings();
+      if (!settings) return;
+      const selectProv = document.getElementById('select-ai-provider') as HTMLSelectElement;
+      if (selectProv && settings.provider) {
+        selectProv.value = settings.provider;
+        this.updateAIProviderUI(settings.provider);
+      }
+      const openAiKey = document.getElementById('input-openai-key') as HTMLInputElement;
+      if (openAiKey && settings.openaiApiKey) openAiKey.value = settings.openaiApiKey;
+      const openAiModel = document.getElementById('input-openai-model') as HTMLInputElement;
+      if (openAiModel && settings.openaiModel) openAiModel.value = settings.openaiModel;
+
+      const anthropicKey = document.getElementById('input-anthropic-key') as HTMLInputElement;
+      if (anthropicKey && settings.anthropicApiKey) anthropicKey.value = settings.anthropicApiKey;
+      const anthropicModel = document.getElementById('input-anthropic-model') as HTMLInputElement;
+      if (anthropicModel && settings.anthropicModel) anthropicModel.value = settings.anthropicModel;
+    } catch (e) {
+      console.error('[NeoAI] Failed to load settings:', e);
+    }
+  }
+
+  private async saveAISettings(): Promise<void> {
+    const provider = (document.getElementById('select-ai-provider') as HTMLSelectElement)?.value as any || 'antigravity';
+    const openaiApiKey = (document.getElementById('input-openai-key') as HTMLInputElement)?.value || '';
+    const openaiModel = (document.getElementById('input-openai-model') as HTMLInputElement)?.value || 'gpt-4o';
+    const anthropicApiKey = (document.getElementById('input-anthropic-key') as HTMLInputElement)?.value || '';
+    const anthropicModel = (document.getElementById('input-anthropic-model') as HTMLInputElement)?.value || 'claude-3-5-sonnet-20241022';
+
+    const ok = await window.electronAPI.aiSaveSettings({
+      provider,
+      openaiApiKey,
+      openaiModel,
+      anthropicApiKey,
+      anthropicModel
+    });
+
+    if (ok) {
+      alert('AI settings saved successfully!');
+      this.switchAITab('prompt');
+    } else {
+      alert('Failed to save AI settings.');
+    }
+  }
+
+  private async generateAISlide(): Promise<void> {
+    if (!this.deckPath || !this.manifest) {
+      alert('Please open a presentation first.');
+      return;
+    }
+
+    const promptText = (document.getElementById('input-ai-prompt-text') as HTMLTextAreaElement)?.value.trim();
+    if (!promptText) {
+      alert('Please enter a description or prompt for the slide.');
+      return;
+    }
+
+    const slideTitle = (document.getElementById('input-ai-slide-title') as HTMLInputElement)?.value.trim() || '';
+    const targetMode = ((document.querySelector('input[name="ai-target-mode"]:checked') as HTMLInputElement)?.value || 'new') as 'new' | 'restyle';
+
+    const statusEl = document.getElementById('ai-status-indicator');
+    const statusTextEl = document.getElementById('ai-status-text');
+    const generateBtn = document.getElementById('btn-generate-ai-slide') as HTMLButtonElement;
+
+    if (statusEl) statusEl.classList.remove('hidden');
+    if (statusTextEl) statusTextEl.textContent = 'Designing slide using AI and current theme... (this may take a few seconds)';
+    if (generateBtn) generateBtn.disabled = true;
+
+    try {
+      const currentSlide = this.manifest.slides[this.currentIndex];
+      const res = await window.electronAPI.aiGenerateSlide({
+        deckPath: this.deckPath,
+        currentSlideRelPath: currentSlide ? currentSlide.path : undefined,
+        userPrompt: promptText,
+        slideTitle,
+        mode: targetMode
+      });
+
+      if (!res.success || !res.slideHtml) {
+        alert(`AI Generation Failed:\n${res.error || 'Unknown error'}`);
+        return;
+      }
+
+      this.closeAIDesignerModal();
+
+      const finalTitle = res.slideTitle || slideTitle || 'AI Designed Slide';
+
+      if (targetMode === 'restyle' && currentSlide) {
+        // Overwrite currently selected slide HTML
+        const saved = await window.electronAPI.saveSlideHtml(currentSlide.path, res.slideHtml);
+        if (saved) {
+          this.reloadCurrentSlide();
+          alert('Current slide restyled successfully!');
+        }
+      } else {
+        // Insert brand new slide after current slide
+        const insertAfter = this.currentIndex;
+        const targetIndex = insertAfter >= 0 ? insertAfter + 1 : 0;
+        const updatedManifest = await window.electronAPI.addCustomSlide(finalTitle, res.slideHtml, insertAfter);
+        if (updatedManifest) {
+          this.manifest = updatedManifest;
+          this.renderSidebarSlides();
+          this.goToSlide(targetIndex);
+        }
+      }
+    } catch (e: any) {
+      console.error('[NeoAI] Generation error:', e);
+      alert(`Error during AI generation: ${e.message}`);
+    } finally {
+      if (statusEl) statusEl.classList.add('hidden');
+      if (generateBtn) generateBtn.disabled = false;
     }
   }
 

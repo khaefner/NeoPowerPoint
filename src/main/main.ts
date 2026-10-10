@@ -5,6 +5,8 @@ import { DeckService } from './deck-service';
 import { DeckWatcher } from './watcher';
 import { registerCustomProtocolScheme, setupCustomProtocolHandler } from './protocol';
 import { DeckManifest } from '../types/deck';
+import { AIService } from './ai-service';
+import { AISettings, GenerateSlideRequest } from '../types/ai';
 
 // Append no-sandbox if needed in Linux environments
 app.commandLine.appendSwitch('no-sandbox');
@@ -16,6 +18,7 @@ let presenterWindow: BrowserWindow | null = null;
 let latestPresenterState: any = null;
 
 const deckService = new DeckService();
+const aiService = new AIService();
 const deckWatcher = new DeckWatcher((filePath, eventType) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('deck:file-changed', { filePath, eventType });
@@ -432,6 +435,32 @@ ipcMain.handle('deck:add-web-slide', async (_, title: string, url: string, inser
   const activePath = deckService.getActiveDeckPath();
   if (!activePath) return null;
   return deckService.addWebSlide(activePath, title, url, insertAfterIndex);
+});
+
+ipcMain.handle('deck:add-custom-slide', async (_, title: string, htmlContent: string, insertAfterIndex?: number) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.addCustomSlide(activePath, title, htmlContent, insertAfterIndex);
+});
+
+// AI Designer Endpoints
+ipcMain.handle('ai:get-settings', async () => {
+  return aiService.getSettings();
+});
+
+ipcMain.handle('ai:save-settings', async (_, settings: AISettings) => {
+  return aiService.saveSettings(settings);
+});
+
+ipcMain.handle('ai:generate-slide', async (_, req: GenerateSlideRequest) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) {
+    return { success: false, error: 'No presentation currently open' };
+  }
+  return aiService.generateSlide({
+    ...req,
+    deckPath: activePath
+  });
 });
 
 ipcMain.handle('window:toggle-fullscreen', async () => {

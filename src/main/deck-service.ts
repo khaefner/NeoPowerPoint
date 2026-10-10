@@ -458,6 +458,37 @@ export class DeckService {
   }
 
   /**
+   * Inserts a slide with custom HTML content (e.g. from AI generation)
+   */
+  async addCustomSlide(folderPath: string, title: string, htmlContent: string, insertAfterIndex: number = -1): Promise<DeckManifest> {
+    const manifestPath = path.join(folderPath, 'deck.json');
+    const raw = await fs.promises.readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(raw) as DeckManifest;
+
+    const folderSlug = `${Date.now()}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'slide'}`;
+    const slideDir = path.join(folderPath, 'slides', folderSlug);
+    await fs.promises.mkdir(slideDir, { recursive: true });
+
+    await fs.promises.writeFile(path.join(slideDir, 'index.html'), htmlContent, 'utf-8');
+
+    const newSlide: SlideMetadata = {
+      id: `slide-${Date.now()}`,
+      title,
+      path: path.posix.join('slides', folderSlug, 'index.html'),
+      notes: '',
+      transition: 'fade'
+    };
+
+    if (insertAfterIndex >= 0 && insertAfterIndex < manifest.slides.length) {
+      manifest.slides.splice(insertAfterIndex + 1, 0, newSlide);
+    } else {
+      manifest.slides.push(newSlide);
+    }
+    await this.saveManifest(folderPath, manifest);
+    return manifest;
+  }
+
+  /**
    * Adds an interactive embedded web page slide with scaling and scroll toggle.
    * If insertAfterIndex is provided and >= 0, inserts right after that slide; otherwise appends.
    */

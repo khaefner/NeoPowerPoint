@@ -45,6 +45,11 @@
           <span id="label-toggle-edit">Test Scripts</span>
         </button>
 
+        <button id="btn-ai-designer" class="btn btn-secondary" title="Design or Restyle Slide with AI (Ctrl+J)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+          <span style="background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 700;">✨ AI Design</span>
+        </button>
+
         <button id="btn-overview-grid" class="btn btn-secondary" title="Slide Sorter (O)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
           Slide Sorter
@@ -78,6 +83,7 @@
             <button id="menu-new-deck">✨ New Presentation...</button>
             <button id="menu-new-slide">➕ Add Blank Slide...</button>
             <button id="menu-new-web-slide">🌐 Embed Web Page Slide...</button>
+            <button id="menu-ai-designer">✨ AI Slide Designer...</button>
             <button id="menu-toggle-edit">✏️ Edit Slide (Ctrl+E)</button>
             <button id="menu-save-slide">💾 Save Slide (Ctrl+S)</button>
             <div class="dropdown-divider"></div>
@@ -355,6 +361,121 @@
           <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px;">
             <button id="btn-cancel-web-modal" class="btn btn-secondary">Cancel</button>
             <button id="btn-confirm-web-modal" class="btn btn-primary">➕ Create Web Slide</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Slide Designer Modal -->
+    <div id="ai-designer-modal" class="modal-overlay hidden">
+      <div class="modal-card" style="width: 650px; max-height: 90vh; overflow-y: auto;">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.4rem;">✨</span>
+            <h3 style="margin: 0; background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">AI Slide Designer</h3>
+          </div>
+          <button id="btn-close-ai-modal" class="btn-icon">✕</button>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <!-- Tabs / Mode Bar -->
+          <div style="display: flex; border-bottom: 1px solid var(--border-color); gap: 16px; margin-bottom: 4px;">
+            <button id="tab-ai-prompt" class="btn-text" style="padding-bottom: 8px; font-weight: 600; color: var(--accent-primary); border-bottom: 2px solid var(--accent-primary);">Design Slide</button>
+            <button id="tab-ai-settings" class="btn-text" style="padding-bottom: 8px; font-weight: 600; color: var(--text-muted); border-bottom: 2px solid transparent;">AI Providers &amp; Keys</button>
+          </div>
+
+          <!-- Section 1: Prompt & Slide Design -->
+          <div id="ai-section-prompt" style="display: flex; flex-direction: column; gap: 14px;">
+            <div style="display: flex; gap: 12px;">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer;">
+                <input type="radio" name="ai-target-mode" value="new" checked>
+                Insert New Slide
+              </label>
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer;">
+                <input type="radio" name="ai-target-mode" value="restyle">
+                Restyle / Redesign Current Slide
+              </label>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <label for="input-ai-slide-title" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main);">Slide Title (Optional)</label>
+              <input type="text" id="input-ai-slide-title" class="editor-select" style="width: 100%; padding: 8px 12px; font-size: 0.9rem;" placeholder="e.g. Modern Architecture Overview">
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <label for="input-ai-prompt-text" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main);">Prompt / Content Draft</label>
+              <textarea id="input-ai-prompt-text" class="editor-select" style="width: 100%; height: 110px; padding: 10px 12px; font-size: 0.9rem; line-height: 1.4; resize: vertical; font-family: inherit;" placeholder="Describe what you want on this slide. E.g.: 'A 3-column architecture comparison showing Edge, Fog, and Cloud computing with key metrics and glowing card borders in the deck's theme.'"></textarea>
+            </div>
+
+            <!-- Quick Template Chips -->
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+              <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Presets:</span>
+              <button class="btn btn-sm btn-secondary ai-preset-chip" data-preset="3-column feature card grid with icons, clean typography, and subtle glowing borders">3-Pillar Cards</button>
+              <button class="btn btn-sm btn-secondary ai-preset-chip" data-preset="Before vs After split screen comparison with pros/cons panels">Comparison Split</button>
+              <button class="btn btn-sm btn-secondary ai-preset-chip" data-preset="Key metrics dashboard with 3 giant stat callouts and growth badges">Metric Callouts</button>
+              <button class="btn btn-sm btn-secondary ai-preset-chip" data-preset="Horizontal 4-step workflow process diagram with connected arrows">Process Flow</button>
+            </div>
+
+            <div id="ai-status-indicator" class="hidden" style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px;">
+              <span class="live-dot" style="background: #38bdf8;"></span>
+              <span id="ai-status-text" style="font-size: 0.85rem; color: #38bdf8; font-weight: 500;">Designing slide using active AI provider...</span>
+            </div>
+
+            <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px;">
+              <button id="btn-cancel-ai-modal" class="btn btn-secondary">Cancel</button>
+              <button id="btn-generate-ai-slide" class="btn btn-primary">✨ Generate Slide</button>
+            </div>
+          </div>
+
+          <!-- Section 2: AI Settings & API Keys -->
+          <div id="ai-section-settings" class="hidden" style="display: flex; flex-direction: column; gap: 16px;">
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <label for="select-ai-provider" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main);">Active Provider</label>
+              <select id="select-ai-provider" class="editor-select" style="width: 100%; padding: 8px 12px; font-size: 0.9rem;">
+                <option value="antigravity" selected>Antigravity CLI (Logged-in Gemini / Agent Session)</option>
+                <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+                <option value="anthropic">Anthropic (Claude 3.5 Sonnet)</option>
+              </select>
+            </div>
+
+            <!-- Antigravity Config -->
+            <div id="group-ai-antigravity" style="display: flex; flex-direction: column; gap: 6px; padding: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 6px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.1rem;">⚡</span>
+                <strong style="font-size: 0.88rem; color: #38bdf8;">Active Logged-in Antigravity</strong>
+              </div>
+              <p style="font-size: 0.82rem; color: var(--text-muted); margin: 0; line-height: 1.4;">
+                Uses your authenticated Antigravity CLI account (`/home/parallels/.local/bin/agy`). No separate API key required!
+              </p>
+            </div>
+
+            <!-- OpenAI Config -->
+            <div id="group-ai-openai" class="hidden" style="display: flex; flex-direction: column; gap: 10px; padding: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 6px;">
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <label for="input-openai-key" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main);">OpenAI API Key (sk-...)</label>
+                <input type="password" id="input-openai-key" class="editor-select" style="width: 100%; padding: 8px 12px; font-size: 0.9rem;" placeholder="sk-...">
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <label for="input-openai-model" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main);">Model</label>
+                <input type="text" id="input-openai-model" class="editor-select" style="width: 100%; padding: 8px 12px; font-size: 0.9rem;" value="gpt-4o">
+              </div>
+            </div>
+
+            <!-- Anthropic Config -->
+            <div id="group-ai-anthropic" class="hidden" style="display: flex; flex-direction: column; gap: 10px; padding: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 6px;">
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <label for="input-anthropic-key" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main);">Anthropic API Key (sk-ant-...)</label>
+                <input type="password" id="input-anthropic-key" class="editor-select" style="width: 100%; padding: 8px 12px; font-size: 0.9rem;" placeholder="sk-ant-...">
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <label for="input-anthropic-model" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main);">Model</label>
+                <input type="text" id="input-anthropic-model" class="editor-select" style="width: 100%; padding: 8px 12px; font-size: 0.9rem;" value="claude-3-5-sonnet-20241022">
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              <button id="btn-save-ai-settings" class="btn btn-primary">💾 Save Settings</button>
+            </div>
           </div>
         </div>
       </div>
