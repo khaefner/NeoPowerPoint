@@ -209,13 +209,15 @@ def render_paragraph(p, slide_num, font_scale=1.0, p_idx=None, para_anim=None, a
 
     if bullet:
         bullet_text = format_bullet_str(bullet, auto_idx)
+        if bullet_text == '§':
+            bullet_text = '▪'
         bullet_char = html.escape(bullet_text)
         indent_val = max(24.0, abs(indent) if indent else 32.0)
         p_styles.append(f'position: relative; padding-left: {mar_l:.1f}px;')
         style_attr = f' style="{" ".join(p_styles)}"' if p_styles else ''
         first_run = p.get('runs', [{}])[0] if p.get('runs') else {}
         bullet_sz = first_run.get('size_px', 24.0) * font_scale
-        bullet_col = first_run.get('color', 'inherit')
+        bullet_col = p.get('bullet_color') or first_run.get('color', 'inherit')
         bullet_span = f'<span style="position: absolute; left: {(mar_l - indent_val):.1f}px; font-size: {bullet_sz:.1f}px; color: {bullet_col}; line-height: inherit; user-select: none;">{bullet_char}</span>'
         return f'<p{class_attr}{style_attr}{anim_attrs}>{bullet_span}{runs_html}</p>'
     else:

@@ -177,6 +177,19 @@ async function runTests() {
       throw new Error('Slide 16 vertical line 16 is missing double-ended SVG arrow markers');
     }
     console.log('✓ Validated slide 16 renders horizontal port lines and vertical connector as arrows with SVG markers');
+
+    // Bullet point validation (Wingdings square bullet translated to ▪ instead of raw §)
+    const slide75 = manifest.slides.find(s => s.path.includes('transition-from-ipv4-to-ipv6'));
+    if (slide75) {
+      const s75Html = await fs.promises.readFile(path.join(convertedDeckDir, slide75.path), 'utf-8');
+      if (s75Html.includes('>§<')) {
+        throw new Error('Slide 75 still contains raw § section sign instead of translated square bullet ▪');
+      }
+      if (!s75Html.includes('>▪<')) {
+        throw new Error('Slide 75 missing translated square bullet ▪');
+      }
+      console.log('✓ Validated bullet points match PowerPoint symbols (square bullet translated to ▪)');
+    }
   }
 
   console.log('\n🎉 ALL PPTX ANIMATION TESTS PASSED SUCCESSFULLY!');

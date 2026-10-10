@@ -400,14 +400,14 @@ export class DeckService {
 
   /**
    * Adds a new slide to an existing presentation.
+   * If insertAfterIndex is provided and >= 0, inserts right after that slide; otherwise appends.
    */
-  async addNewSlide(folderPath: string, title: string): Promise<DeckManifest> {
+  async addNewSlide(folderPath: string, title: string, insertAfterIndex: number = -1): Promise<DeckManifest> {
     const manifestPath = path.join(folderPath, 'deck.json');
     const raw = await fs.promises.readFile(manifestPath, 'utf-8');
     const manifest = JSON.parse(raw) as DeckManifest;
 
-    const slideIndex = manifest.slides.length + 1;
-    const folderSlug = `${String(slideIndex).padStart(2, '0')}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'slide'}`;
+    const folderSlug = `${Date.now()}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'slide'}`;
     const slideDir = path.join(folderPath, 'slides', folderSlug);
     await fs.promises.mkdir(slideDir, { recursive: true });
 
@@ -448,21 +448,25 @@ export class DeckService {
       transition: 'fade'
     };
 
-    manifest.slides.push(newSlide);
+    if (insertAfterIndex >= 0 && insertAfterIndex < manifest.slides.length) {
+      manifest.slides.splice(insertAfterIndex + 1, 0, newSlide);
+    } else {
+      manifest.slides.push(newSlide);
+    }
     await this.saveManifest(folderPath, manifest);
     return manifest;
   }
 
   /**
    * Adds an interactive embedded web page slide with scaling and scroll toggle.
+   * If insertAfterIndex is provided and >= 0, inserts right after that slide; otherwise appends.
    */
-  async addWebSlide(folderPath: string, title: string, url: string): Promise<DeckManifest> {
+  async addWebSlide(folderPath: string, title: string, url: string, insertAfterIndex: number = -1): Promise<DeckManifest> {
     const manifestPath = path.join(folderPath, 'deck.json');
     const raw = await fs.promises.readFile(manifestPath, 'utf-8');
     const manifest = JSON.parse(raw) as DeckManifest;
 
-    const slideIndex = manifest.slides.length + 1;
-    const folderSlug = `${String(slideIndex).padStart(2, '0')}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'web-slide'}`;
+    const folderSlug = `${Date.now()}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'web-slide'}`;
     const slideDir = path.join(folderPath, 'slides', folderSlug);
     await fs.promises.mkdir(slideDir, { recursive: true });
 
@@ -750,7 +754,11 @@ export class DeckService {
       transition: 'fade'
     };
 
-    manifest.slides.push(newSlide);
+    if (insertAfterIndex >= 0 && insertAfterIndex < manifest.slides.length) {
+      manifest.slides.splice(insertAfterIndex + 1, 0, newSlide);
+    } else {
+      manifest.slides.push(newSlide);
+    }
     await this.saveManifest(folderPath, manifest);
     return manifest;
   }

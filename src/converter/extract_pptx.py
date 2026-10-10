@@ -300,6 +300,30 @@ def rpr_props(ctx, el):
     return o
 
 
+# Common PPT / Wingdings bullet symbol translation to standard Unicode
+WINGDINGS_BULLET_MAP = {
+    0x20: ' ',
+    0x71: '❑',  # 113 square shadow
+    0x72: '❒',  # 114
+    0x75: '⬩',  # 117 small diamond
+    0x76: '❖',  # 118 black florette / diamond
+    0x77: '◆',  # 119 black diamond
+    0x78: '✦',  # 120 star
+    0xa7: '▪',  # 167 square bullet (PowerPoint default square bullet!)
+    0xa8: '▫',  # 168 hollow square bullet
+    0xa9: '✦',  # 169
+    0xaa: '★',  # 170
+    0xab: '✶',  # 171
+    0xb2: '✦',  # 178
+    0xd8: '➢',  # 216 3D arrow
+    0xdc: '➔',  # 220 arrow
+    0xe0: '→',  # 224 arrow
+    0xfc: '✓',  # 252 checkmark
+    0xfd: '🗹',  # 253 ballot check
+    0xfe: '☒',  # 254 ballot x
+}
+
+
 def ppr_props(ctx, el, rels=None):
     if el is None:
         return {}
@@ -319,7 +343,18 @@ def ppr_props(ctx, el, rels=None):
     if el.find('a:buNone', NS) is not None:
         o['bullet'] = None
     elif el.find('a:buChar', NS) is not None:
-        o['bullet'] = el.find('a:buChar', NS).get('char')
+        ch = el.find('a:buChar', NS).get('char', '')
+        bu_font_el = el.find('a:buFont', NS)
+        bu_font = bu_font_el.get('typeface', '') if bu_font_el is not None else ''
+        if 'wingdings' in bu_font.lower() and ch:
+            code = ord(ch)
+            o['bullet'] = WINGDINGS_BULLET_MAP.get(code, WINGDINGS_BULLET_MAP.get(code & 0xFF, ch))
+        else:
+            # If ch is '§' (0xA7) which is the raw cp1252 byte for square bullet even if buFont inherited:
+            if ch == '§':
+                o['bullet'] = '▪'
+            else:
+                o['bullet'] = ch
     elif el.find('a:buAutoNum', NS) is not None:
         o['bullet'] = 'auto:' + el.find('a:buAutoNum', NS).get('type', 'arabicPeriod')
     bc = ctx.color_of(el.find('a:buClr', NS))

@@ -422,16 +422,16 @@ ipcMain.handle('deck:get-manifest', async () => {
   return deckService.getActiveManifest();
 });
 
-ipcMain.handle('deck:add-slide', async (_, title: string) => {
+ipcMain.handle('deck:add-slide', async (_, title: string, insertAfterIndex?: number) => {
   const activePath = deckService.getActiveDeckPath();
   if (!activePath) return null;
-  return deckService.addNewSlide(activePath, title);
+  return deckService.addNewSlide(activePath, title, insertAfterIndex);
 });
 
-ipcMain.handle('deck:add-web-slide', async (_, title: string, url: string) => {
+ipcMain.handle('deck:add-web-slide', async (_, title: string, url: string, insertAfterIndex?: number) => {
   const activePath = deckService.getActiveDeckPath();
   if (!activePath) return null;
-  return deckService.addWebSlide(activePath, title, url);
+  return deckService.addWebSlide(activePath, title, url, insertAfterIndex);
 });
 
 ipcMain.handle('window:toggle-fullscreen', async () => {

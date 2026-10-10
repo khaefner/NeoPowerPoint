@@ -1074,11 +1074,13 @@ class PresentationApp {
     const title = prompt('Enter new slide title:', 'New Slide');
     if (!title) return;
 
-    const updatedManifest = await window.electronAPI.addNewSlide(title);
+    const insertAfter = this.currentIndex;
+    const targetIndex = insertAfter >= 0 ? insertAfter + 1 : 0;
+    const updatedManifest = await window.electronAPI.addNewSlide(title, insertAfter);
     if (updatedManifest) {
       this.manifest = updatedManifest;
       this.renderSidebarSlides();
-      this.goToSlide(this.manifest.slides.length - 1);
+      this.goToSlide(targetIndex);
     }
   }
 
@@ -1118,11 +1120,13 @@ class PresentationApp {
 
     this.closeWebSlideModal();
 
-    const updatedManifest = await window.electronAPI.addWebSlide(title, url);
+    const insertAfter = this.currentIndex;
+    const targetIndex = insertAfter >= 0 ? insertAfter + 1 : 0;
+    const updatedManifest = await window.electronAPI.addWebSlide(title, url, insertAfter);
     if (updatedManifest) {
       this.manifest = updatedManifest;
       this.renderSidebarSlides();
-      this.goToSlide(this.manifest.slides.length - 1);
+      this.goToSlide(targetIndex);
     }
   }
 

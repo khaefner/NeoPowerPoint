@@ -80,6 +80,15 @@ async function runWebSlideTests() {
   }
   console.log('✓ Verified deck-service.ts addWebSlide template has iframe, responsive scaler, and fit/scroll toggle');
 
+  // Verify insertAfterIndex placement logic in DeckService and app.ts
+  if (!deckServiceTs.includes('insertAfterIndex: number = -1') || !deckServiceTs.includes('manifest.slides.splice(insertAfterIndex + 1')) {
+    throw new Error('deck-service.ts missing insertAfterIndex splice logic');
+  }
+  if (!appTs.includes('addNewSlide(title, insertAfter)') || !appTs.includes('addWebSlide(title, url, insertAfter)')) {
+    throw new Error('app.ts missing insertAfter passing to addNewSlide / addWebSlide');
+  }
+  console.log('✓ Verified new slides are inserted after currently selected slide');
+
   // Clean up test dir
   await fs.promises.rm(testDir, { recursive: true, force: true });
   console.log('✓ Cleaned up test output.');
