@@ -307,25 +307,56 @@ window.presenterAPI.onInkAction((action: InkSyncAction) => {
 });
 
 // ADB Status Handling
-function updateAdbUi(devices: any[]) {
+function updateAdbUi(data: any) {
+  const devices: any[] = Array.isArray(data) ? data : (data?.devices || []);
+  const isInstalled = data?.installed !== undefined ? data.installed : true;
   const activeDevice = devices?.find((d: any) => d.state === 'device');
+  const unauthDevice = devices?.find((d: any) => d.state === 'unauthorized');
+  const offlineDevice = devices?.find((d: any) => d.state === 'offline');
+
   if (activeDevice) {
     adbDotEl.className = 'adb-dot connected';
-    adbLabelEl.textContent = `Boox: ${activeDevice.model || 'Connected'}`;
+    adbLabelEl.textContent = `${activeDevice.isBoox ? 'Boox' : 'Tablet'}: ${activeDevice.model || 'Connected'}`;
     btnAdbLaunch.disabled = false;
+    btnAdbLaunch.textContent = 'Open on Boox';
+    btnAdbLaunch.title = `Connected to ${activeDevice.model}. Click to launch companion view.`;
+  } else if (unauthDevice) {
+    adbDotEl.className = 'adb-dot unauthorized';
+    adbLabelEl.textContent = `Boox: Unauthorized`;
+    btnAdbLaunch.disabled = true;
+    btnAdbLaunch.textContent = 'Allow on Tablet';
+    btnAdbLaunch.title = `Tablet detected (${unauthDevice.model}). Please unlock tablet screen and tap "Allow USB debugging".`;
+  } else if (offlineDevice) {
+    adbDotEl.className = 'adb-dot unauthorized';
+    adbLabelEl.textContent = `Boox: Offline`;
+    btnAdbLaunch.disabled = true;
+    btnAdbLaunch.textContent = 'Offline';
+    btnAdbLaunch.title = `Tablet is offline. Reconnect USB cable or wake tablet screen.`;
+  } else if (!isInstalled) {
+    adbDotEl.className = 'adb-dot not-installed';
+    adbLabelEl.textContent = `ADB: Not Installed`;
+    btnAdbLaunch.disabled = true;
+    btnAdbLaunch.textContent = 'Install ADB';
+    btnAdbLaunch.title = `Android Debug Bridge (adb) was not found. Install via Homebrew: brew install android-platform-tools`;
   } else {
     adbDotEl.className = 'adb-dot disconnected';
     adbLabelEl.textContent = 'Boox: Disconnected';
     btnAdbLaunch.disabled = true;
+    btnAdbLaunch.textContent = 'Open on Boox';
+    btnAdbLaunch.title = 'No Android tablet connected via USB. Ensure USB Debugging is enabled on your Boox.';
   }
 }
 
 window.presenterAPI.getAdbStatus().then((status) => {
-  updateAdbUi(status?.devices || []);
+  updateAdbUi(status);
 }).catch(() => {});
 
 window.presenterAPI.onAdbDevicesChanged((devices) => {
-  updateAdbUi(devices);
+  window.presenterAPI.getAdbStatus().then((status) => {
+    updateAdbUi(status || devices);
+  }).catch(() => {
+    updateAdbUi(devices);
+  });
 });
 
 btnAdbLaunch.addEventListener('click', async () => {

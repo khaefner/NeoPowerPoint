@@ -105,7 +105,9 @@ async function testSyncServer() {
   let serverReceivedStroke = null;
   let serverReceivedNav = null;
 
+  const testClients = new Set();
   wss.on('connection', (ws) => {
+    testClients.add(ws);
     // Send state
     ws.send(JSON.stringify({
       type: 'slide:state',
@@ -120,7 +122,16 @@ async function testSyncServer() {
       } else if (msg.type === 'slide:navigate') {
         serverReceivedNav = msg.target;
       }
+
+      // Broadcast to other connected clients
+      for (const client of testClients) {
+        if (client !== ws && client.readyState === 1) {
+          client.send(data.toString());
+        }
+      }
     });
+
+    ws.on('close', () => testClients.delete(ws));
   });
 
   await new Promise((res) => server.listen(testPort, res));
@@ -175,8 +186,6 @@ async function testSyncServer() {
 
   // Test Eraser synchronization (tablet erases stroke and sends ink:sync-slide)
   let serverReceivedSyncSlide = null;
-  wss.on('connection', () => {}); // existing
-  const originalOnMessage = wss.listeners('connection')[0];
   clientWs.send(JSON.stringify({
     type: 'ink:sync-slide',
     slideIndex: 0,
@@ -188,6 +197,64 @@ async function testSyncServer() {
   assert.strictEqual(mockInkStore.getStrokes(0).length, 0, 'InkStore must be empty after eraser sync');
   console.log('✓ Tablet eraser ink synchronization verified.');
 
+  // Test Real-Time Scroll Synchronization over WebSocket
+  let serverReceivedScroll = null;
+  let client2ReceivedScroll = null;
+  const client2Ws = new WebSocket(`ws://localhost:${testPort}`);
+  await new Promise((res) => client2Ws.on('open', res));
+
+  client2Ws.on('message', (data) => {
+    const msg = JSON.parse(data.toString());
+    if (msg.type === 'slide:scroll') {
+      client2ReceivedScroll = msg;
+    }
+  });
+
+  // Client 1 scrolls web slide viewport
+  clientWs.send(JSON.stringify({
+    type: 'slide:scroll',
+    slideIndex: 0,
+    selector: '#web-viewport',
+    scrollTop: 450,
+    scrollLeft: 0,
+    ratioX: 0,
+    ratioY: 0.35
+  }));
+
+  await new Promise((res) => setTimeout(res, 80));
+  assert(client2ReceivedScroll, 'Client 2 must receive broadcasted slide:scroll');
+  assert.strictEqual(client2ReceivedScroll.selector, '#web-viewport');
+  assert.strictEqual(client2ReceivedScroll.scrollTop, 450);
+  assert.strictEqual(client2ReceivedScroll.ratioY, 0.35);
+  console.log('✓ Real-time slide viewport scroll synchronization over WebSocket verified.');
+
+  // Test Real-Time DOM & Display Mutation Synchronization (mode toggles, anim steps, inputs)
+  let client2ReceivedDom = null;
+  client2Ws.on('message', (data) => {
+    const msg = JSON.parse(data.toString());
+    if (msg.type === 'slide:dom-sync') {
+      client2ReceivedDom = msg;
+    }
+  });
+
+  // Client 1 toggles web slide to scrollable mode and animates step 2
+  clientWs.send(JSON.stringify({
+    type: 'slide:dom-sync',
+    slideIndex: 0,
+    bodyClass: 'mode-scroll',
+    animStep: 2,
+    attributes: [{ selector: '#toggle-box', name: 'class', value: 'expanded active' }],
+    inputs: [{ selector: '#search-box', value: 'NeoDeck query' }]
+  }));
+
+  await new Promise((res) => setTimeout(res, 80));
+  assert(client2ReceivedDom, 'Client 2 must receive broadcasted slide:dom-sync');
+  assert.strictEqual(client2ReceivedDom.bodyClass, 'mode-scroll');
+  assert.strictEqual(client2ReceivedDom.animStep, 2);
+  assert.strictEqual(client2ReceivedDom.inputs[0].value, 'NeoDeck query');
+  console.log('✓ Real-time DOM mutations, display mode, and animation step synchronization verified.');
+
+  client2Ws.close();
   clientWs.close();
   wss.close();
   server.close();
@@ -235,8 +302,10 @@ testAdbParsing();
 const appJs = fs.readFileSync('dist/renderer/app.js', 'utf-8');
 const presenterJs = fs.readFileSync('dist/presenter/presenter.js', 'utf-8');
 assert(appJs.includes('ink-overlay') || appJs.includes('onInkAction'), 'app.js must contain ink-overlay and onInkAction logic');
+assert(appJs.includes('setupIframeSyncBridge') && appJs.includes('syncSlideScroll') && appJs.includes('syncSlideDom'), 'app.js must contain iframe sync bridge and IPC triggers');
 assert(presenterJs.includes('ink-overlay') || presenterJs.includes('onInkAction'), 'presenter.js must contain ink-overlay and onInkAction logic');
 assert(presenterJs.includes('adb-pill') || presenterJs.includes('btn-adb-launch'), 'presenter.js must contain ADB tablet button logic');
-console.log('✓ Verified InkOverlay and ADB controls in Audience and Presenter View bundles.');
+assert(tabletJs.includes('applyScroll') && tabletJs.includes('applyDomSync') && tabletJs.includes('applyAnimStep'), 'tablet.js must include slide scroll, DOM sync, and animStep mirroring');
+console.log('✓ Verified InkOverlay, ADB controls, and Slide Sync bridges in Presentation & Tablet bundles.');
 
 console.log('\n🎉 ALL ADB, PRESENTATION, PRESENTER VIEW & INKING SYNC TESTS PASSED SUCCESSFULLY!\n');

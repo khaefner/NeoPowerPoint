@@ -10,7 +10,16 @@ import { AISettings, GenerateSlideRequest } from '../types/ai';
 import { ADBService } from './adb-service';
 import { SyncServer } from './sync-server';
 import { InkStore } from './ink-store';
-import { InkSyncAction } from '../types/ink';
+import { InkSyncAction, SlideScrollAction, SlideDomSyncAction } from '../types/ink';
+import { logger } from './logger';
+
+process.on('uncaughtException', (err) => {
+  logger.error('MainProcess', 'Uncaught Exception', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('MainProcess', 'Unhandled Promise Rejection', reason);
+});
 
 // Append no-sandbox if needed in Linux environments
 app.commandLine.appendSwitch('no-sandbox');
@@ -38,9 +47,7 @@ function broadcastToWindows(channel: string, data: any): void {
 
 // Wire SyncServer and ADBService events
 adbService.on('devices-changed', (devices) => {
-  if (presenterWindow && !presenterWindow.isDestroyed()) {
-    presenterWindow.webContents.send('adb:devices-changed', devices);
-  }
+  broadcastToWindows('adb:devices-changed', devices);
 });
 
 syncServer.on('slide:navigate', (target) => {
@@ -80,6 +87,7 @@ const deckWatcher = new DeckWatcher((filePath, eventType) => {
 });
 
 function createMainWindow(): void {
+  logger.info('MainProcess', 'Creating main window');
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -96,8 +104,14 @@ function createMainWindow(): void {
     }
   });
 
-  mainWindow.webContents.on('console-message', (_event, _level, message) => {
-    console.log(`[RENDERER CONSOLE]: ${message}`);
+  mainWindow.webContents.on('console-message', (_event, level, message) => {
+    const levelMap: Record<number, 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'> = {
+      0: 'DEBUG',
+      1: 'INFO',
+      2: 'WARN',
+      3: 'ERROR'
+    };
+    logger.log(levelMap[level] || 'INFO', 'RendererConsole', message);
   });
 
   mainWindow.loadURL('neopres://deck/renderer/index.html');
@@ -248,6 +262,20 @@ function buildAppMenu(): void {
           }
         },
         { type: 'separator' },
+        {
+          label: 'Export Debug Logs...',
+          accelerator: 'CmdOrCtrl+Shift+L',
+          click: async () => {
+            await logger.exportLogs(mainWindow || undefined);
+          }
+        },
+        {
+          label: 'Open Logs Folder',
+          click: async () => {
+            await logger.openLogDir();
+          }
+        },
+        { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
       ]
     },
@@ -326,6 +354,33 @@ function buildAppMenu(): void {
             if (mainWindow) mainWindow.webContents.send('slide:navigate', 'last');
           }
         }
+      ]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Keyboard Shortcuts',
+          accelerator: 'CmdOrCtrl+/',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send('menu:help-shortcuts');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Export Debug Logs...',
+          click: async () => {
+            await logger.exportLogs(mainWindow || undefined);
+          }
+        },
+        {
+          label: 'Open Logs Folder',
+          click: async () => {
+            await logger.openLogDir();
+          }
+        },
+        { type: 'separator' },
+        { role: 'toggleDevTools' }
       ]
     }
   ];
@@ -434,14 +489,28 @@ async function handleImportPptx() {
   });
 
   if (result.canceled || result.filePaths.length === 0) {
+    logger.info('MainProcess', 'PPTX file selection canceled');
     return null;
   }
 
   const pptxPath = result.filePaths[0];
-  const deckData = await deckService.importPptx(pptxPath);
-  inkStore.resetAll();
-  deckWatcher.watch(deckData.deckPath);
-  return deckData;
+  logger.info('MainProcess', `Importing PowerPoint file: ${pptxPath}`);
+  try {
+    const deckData = await deckService.importPptx(pptxPath);
+    inkStore.resetAll();
+    deckWatcher.watch(deckData.deckPath);
+    logger.info('MainProcess', `Successfully imported PPTX into: ${deckData.deckPath}`);
+    return deckData;
+  } catch (err: any) {
+    logger.error('MainProcess', `Failed to import PowerPoint file: ${pptxPath}`, err);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('deck:import-error', {
+        error: err.message,
+        details: err.stack || String(err)
+      });
+    }
+    throw err;
+  }
 }
 
 // IPC Handlers
@@ -450,6 +519,12 @@ ipcMain.handle('dialog:open-package', async () => handleOpenPackage());
 ipcMain.handle('dialog:import-pptx', async () => handleImportPptx());
 ipcMain.handle('dialog:export-package', async () => handleExportPackage());
 ipcMain.handle('dialog:create-deck', async () => handleCreateDeck());
+ipcMain.handle('dialog:export-logs', async () => logger.exportLogs(mainWindow || undefined));
+ipcMain.handle('dialog:open-logs-folder', async () => logger.openLogDir());
+ipcMain.handle('logger:get-logs', async () => logger.generateDiagnosticReport());
+ipcMain.handle('logger:log', async (_event, level: any, message: string, details?: any) => {
+  logger.log(level || 'INFO', 'Renderer', message, details);
+});
 
 ipcMain.handle('deck:load-sample', async () => {
   const sampleDir = path.join(__dirname, '../../sample-deck');
@@ -590,6 +665,20 @@ ipcMain.on('ink:host-action', (event, action: InkSyncAction) => {
   }
 });
 
+ipcMain.on('slide:sync-scroll', (_, action: SlideScrollAction) => {
+  syncServer.broadcastSlideScroll(action);
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('slide:scroll', action);
+  }
+});
+
+ipcMain.on('slide:sync-dom', (_, action: SlideDomSyncAction) => {
+  syncServer.broadcastSlideDom(action);
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('slide:dom-sync', action);
+  }
+});
+
 // ADB IPC Handlers
 ipcMain.handle('adb:get-status', async () => {
   return adbService.getStatus();
@@ -625,10 +714,14 @@ ipcMain.on('presenter:prev', () => {
 app.whenReady().then(async () => {
   setupCustomProtocolHandler(deckService);
   try {
-    await syncServer.start();
+    const port = await syncServer.start();
+    if (typeof port === 'number') {
+      adbService.setPort(port);
+    }
     adbService.startMonitoring(3000);
+    logger.info('MainProcess', `SyncServer started on port ${port}, ADB monitoring active`);
   } catch (err: any) {
-    console.warn('[MAIN] Error starting sync server or ADB service:', err.message);
+    logger.error('MainProcess', 'Error starting sync server or ADB service', err);
   }
   createMainWindow();
 

@@ -1,6 +1,9 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { EventEmitter } from 'events';
+import { resolveAdbCommand } from './adb-resolver';
+import { getAugmentedEnv } from './python-resolver';
+import { logger } from './logger';
 
 const execAsync = promisify(exec);
 
@@ -13,10 +16,12 @@ export interface ADBDevice {
 
 export interface ADBStatus {
   installed: boolean;
+  adbPath: string | null;
   devices: ADBDevice[];
   activePort: number;
   reverseActive: boolean;
   lastError?: string;
+  statusMessage: string;
 }
 
 export class ADBService extends EventEmitter {
@@ -26,6 +31,7 @@ export class ADBService extends EventEmitter {
   private isInstalled: boolean = false;
   private isChecking: boolean = false;
   private reverseConfigured: boolean = false;
+  private adbCmd: string | null = null;
 
   constructor(port: number = 8765) {
     super();
@@ -40,13 +46,39 @@ export class ADBService extends EventEmitter {
     return this.port;
   }
 
+  public getAdbPath(): string | null {
+    return this.adbCmd;
+  }
+
   /**
-   * Check if adb is executable in current PATH
+   * Helper to execute adb commands using resolved adb binary and augmented PATH.
+   */
+  private async execAdb(subcommand: string): Promise<{ stdout: string; stderr: string }> {
+    const cmdBinary = this.adbCmd || 'adb';
+    const binary = cmdBinary.includes(' ') ? `"${cmdBinary}"` : cmdBinary;
+    const fullCmd = `${binary} ${subcommand}`;
+    return execAsync(fullCmd, { env: getAugmentedEnv() });
+  }
+
+  /**
+   * Check if adb is executable in current system / PATH.
    */
   public async checkAdbInstalled(): Promise<boolean> {
     try {
-      const { stdout } = await execAsync('adb version');
+      const resolved = resolveAdbCommand();
+      if (resolved) {
+        this.adbCmd = resolved.command;
+        this.isInstalled = true;
+        logger.info('ADBService', `Resolved ADB executable: ${resolved.command} (${resolved.version})`);
+        return true;
+      }
+
+      // Try running bare 'adb version' with augmented env
+      const { stdout } = await this.execAdb('version');
       this.isInstalled = stdout.toLowerCase().includes('android debug bridge');
+      if (this.isInstalled && !this.adbCmd) {
+        this.adbCmd = 'adb';
+      }
       return this.isInstalled;
     } catch {
       this.isInstalled = false;
@@ -55,11 +87,18 @@ export class ADBService extends EventEmitter {
   }
 
   /**
-   * List currently attached ADB devices
+   * List currently attached ADB devices.
    */
   public async getDevices(): Promise<ADBDevice[]> {
     try {
-      const { stdout } = await execAsync('adb devices -l');
+      if (!this.isInstalled) {
+        await this.checkAdbInstalled();
+      }
+      if (!this.isInstalled) {
+        return [];
+      }
+
+      const { stdout } = await this.execAdb('devices -l');
       const lines = stdout.split('\n');
       const devices: ADBDevice[] = [];
 
@@ -78,19 +117,39 @@ export class ADBService extends EventEmitter {
           else if (stateStr === 'unauthorized') state = 'unauthorized';
           else if (stateStr === 'offline') state = 'offline';
 
-          // Extract model if present (e.g. model:NoteAir3_C or model:TabUltra)
           let model = 'Android Device';
+          let product = '';
+          let devProp = '';
+
           for (const p of parts) {
             if (p.startsWith('model:')) {
               model = p.replace('model:', '').replace(/_/g, ' ');
+            } else if (p.startsWith('product:')) {
+              product = p.replace('product:', '').toLowerCase();
+            } else if (p.startsWith('device:')) {
+              devProp = p.replace('device:', '').toLowerCase();
             }
           }
 
-          const isBoox = model.toLowerCase().includes('boox') ||
-            model.toLowerCase().includes('note') ||
-            model.toLowerCase().includes('tab') ||
-            model.toLowerCase().includes('leaf') ||
-            model.toLowerCase().includes('palma');
+          const combinedLower = `${model.toLowerCase()} ${product} ${devProp}`;
+          const booxKeywords = [
+            'boox', 'onyx', 'note', 'tab', 'leaf', 'palma', 'go',
+            'nova', 'max', 'page', 'poke', 'mira', 'kant', 'galileo',
+            'monte', 'darwin', 'edison', 'viking'
+          ];
+
+          let isBoox = booxKeywords.some((kw) => combinedLower.includes(kw));
+
+          // If state is authorized and not matched yet, check manufacturer property
+          if (!isBoox && state === 'device') {
+            try {
+              const { stdout: mfgOut } = await this.execAdb(`-s ${id} shell getprop ro.product.manufacturer`);
+              const mfg = mfgOut.trim().toLowerCase();
+              if (mfg.includes('onyx') || mfg.includes('boox')) {
+                isBoox = true;
+              }
+            } catch (_) {}
+          }
 
           devices.push({ id, model, state, isBoox });
         }
@@ -98,31 +157,33 @@ export class ADBService extends EventEmitter {
 
       return devices;
     } catch (err: any) {
-      console.warn('[ADBService] Error listing devices:', err.message);
+      logger.warn('ADBService', `Error listing devices: ${err.message}`);
       return [];
     }
   }
 
   /**
-   * Set up reverse port forwarding (device localhost:PORT -> host localhost:PORT)
+   * Set up reverse port forwarding (device localhost:PORT -> host localhost:PORT).
    */
   public async setupReverse(deviceId?: string): Promise<{ success: boolean; error?: string }> {
     try {
+      if (!this.isInstalled) {
+        await this.checkAdbInstalled();
+      }
       const targetFlag = deviceId ? `-s ${deviceId} ` : '';
-      const cmd = `adb ${targetFlag}reverse tcp:${this.port} tcp:${this.port}`;
-      await execAsync(cmd);
+      await this.execAdb(`${targetFlag}reverse tcp:${this.port} tcp:${this.port}`);
       this.reverseConfigured = true;
-      console.log(`[ADBService] Successfully configured ${cmd}`);
+      logger.info('ADBService', `Successfully configured reverse port forwarding on tcp:${this.port}`);
       return { success: true };
     } catch (err: any) {
       this.reverseConfigured = false;
-      console.warn('[ADBService] Failed to reverse port forward:', err.message);
+      logger.warn('ADBService', `Failed to reverse port forward: ${err.message}`);
       return { success: false, error: err.message };
     }
   }
 
   /**
-   * Open the tablet app in Android's browser over ADB
+   * Open the tablet app in Android's browser over ADB.
    */
   public async launchTabletBrowser(deviceId?: string): Promise<{ success: boolean; error?: string }> {
     try {
@@ -131,18 +192,17 @@ export class ADBService extends EventEmitter {
 
       const targetFlag = deviceId ? `-s ${deviceId} ` : '';
       const url = `http://localhost:${this.port}/tablet/`;
-      const cmd = `adb ${targetFlag}shell am start -a android.intent.action.VIEW -d "${url}"`;
-      await execAsync(cmd);
-      console.log(`[ADBService] Launched tablet browser with URL: ${url}`);
+      logger.info('ADBService', `Launching tablet browser with URL: ${url}`);
+      await this.execAdb(`${targetFlag}shell am start -a android.intent.action.VIEW -d "${url}"`);
       return { success: true };
     } catch (err: any) {
-      console.warn('[ADBService] Failed to launch browser on tablet:', err.message);
+      logger.error('ADBService', `Failed to launch browser on tablet: ${err.message}`);
       return { success: false, error: err.message };
     }
   }
 
   /**
-   * Start periodic monitoring for connected devices
+   * Start periodic monitoring for connected devices.
    */
   public startMonitoring(intervalMs: number = 3000): void {
     if (this.monitorInterval) return;
@@ -176,7 +236,7 @@ export class ADBService extends EventEmitter {
       }
 
       const devices = await this.getDevices();
-      const activeDevices = devices.filter(d => d.state === 'device');
+      const activeDevices = devices.filter((d) => d.state === 'device');
 
       // Check for newly connected devices
       const hadDevices = this.lastDevices.length > 0;
@@ -192,22 +252,42 @@ export class ADBService extends EventEmitter {
       // Check if devices list changed
       const changed = JSON.stringify(devices) !== JSON.stringify(this.lastDevices);
       if (changed) {
+        logger.info('ADBService', `Connected ADB devices changed: ${JSON.stringify(devices)}`);
         this.lastDevices = devices;
         this.emit('devices-changed', devices);
       }
     } catch (err: any) {
-      console.warn('[ADBService] Poll error:', err.message);
+      logger.warn('ADBService', `Poll error: ${err.message}`);
     } finally {
       this.isChecking = false;
     }
   }
 
   public getStatus(): ADBStatus {
+    let statusMessage = 'Boox: Disconnected';
+    if (!this.isInstalled) {
+      statusMessage = 'ADB: Not Installed (Install via Homebrew: brew install android-platform-tools)';
+    } else {
+      const activeDevice = this.lastDevices.find((d) => d.state === 'device');
+      const unauthDevice = this.lastDevices.find((d) => d.state === 'unauthorized');
+      const offlineDevice = this.lastDevices.find((d) => d.state === 'offline');
+
+      if (activeDevice) {
+        statusMessage = `${activeDevice.isBoox ? 'Boox' : 'Tablet'}: ${activeDevice.model} (Connected)`;
+      } else if (unauthDevice) {
+        statusMessage = `${unauthDevice.model}: Unauthorized (Unlock tablet screen and tap Allow)`;
+      } else if (offlineDevice) {
+        statusMessage = `${offlineDevice.model}: Offline`;
+      }
+    }
+
     return {
       installed: this.isInstalled,
+      adbPath: this.adbCmd,
       devices: this.lastDevices,
       activePort: this.port,
       reverseActive: this.reverseConfigured,
+      statusMessage
     };
   }
 }

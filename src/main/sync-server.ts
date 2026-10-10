@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 import { DeckService } from './deck-service';
 import { InkStore } from './ink-store';
-import { InkStroke, InkPoint, InkSyncAction } from '../types/ink';
+import { InkStroke, InkPoint, InkSyncAction, SlideScrollAction, SlideDomSyncAction } from '../types/ink';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -34,6 +34,8 @@ export class SyncServer extends EventEmitter {
   private inkStore: InkStore;
   private latestState: any = null;
   private clients: Set<WebSocket> = new Set();
+  private currentSlideScroll: Map<number, SlideScrollAction> = new Map();
+  private currentSlideDom: Map<number, SlideDomSyncAction> = new Map();
 
   constructor(deckService: DeckService, inkStore: InkStore, port: number = 8765) {
     super();
@@ -121,6 +123,18 @@ export class SyncServer extends EventEmitter {
       return;
     }
 
+    // External URL proxy for web slides on tablet
+    if (pathname === '/api/proxy') {
+      const targetUrl = parsedUrl.searchParams.get('url');
+      if (!targetUrl) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Missing url parameter');
+        return;
+      }
+      this.proxyExternalUrl(targetUrl, req, res);
+      return;
+    }
+
     // Route to tablet app
     if (pathname === '/tablet') {
       res.writeHead(302, { Location: '/tablet/' });
@@ -165,7 +179,8 @@ export class SyncServer extends EventEmitter {
         return;
       }
 
-      this.serveStaticFile(filePath, res);
+      const isTabletView = parsedUrl.searchParams.get('view') === 'tablet';
+      this.serveStaticFile(filePath, res, isTabletView);
       return;
     }
 
@@ -173,7 +188,7 @@ export class SyncServer extends EventEmitter {
     res.end('Not Found');
   }
 
-  private serveStaticFile(filePath: string, res: http.ServerResponse): void {
+  private serveStaticFile(filePath: string, res: http.ServerResponse, isTabletView: boolean = false): void {
     if (!fs.existsSync(filePath)) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('File Not Found');
@@ -185,7 +200,7 @@ export class SyncServer extends EventEmitter {
       if (stat.isDirectory()) {
         const indexPath = path.join(filePath, 'index.html');
         if (fs.existsSync(indexPath)) {
-          return this.serveStaticFile(indexPath, res);
+          return this.serveStaticFile(indexPath, res, isTabletView);
         }
         res.writeHead(403, { 'Content-Type': 'text/plain' });
         res.end('Directory listing forbidden');
@@ -194,8 +209,24 @@ export class SyncServer extends EventEmitter {
 
       const ext = path.extname(filePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      const fileBuffer = fs.readFileSync(filePath);
 
+      if (isTabletView && (ext === '.html' || ext === '.htm')) {
+        let html = fs.readFileSync(filePath, 'utf-8');
+        // If HTML has web-frame pointing to http/https, rewrite to /api/proxy?url=
+        html = html.replace(/<iframe\s+([^>]*?)id="web-frame"([^>]*?)src="(https?:\/\/[^"]+)"/gi, (match, before, mid, url) => {
+          return `<iframe ${before}id="web-frame"${mid}src="/api/proxy?url=${encodeURIComponent(url)}"`;
+        });
+        const fileBuffer = Buffer.from(html, 'utf-8');
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Content-Length': fileBuffer.length,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        });
+        res.end(fileBuffer);
+        return;
+      }
+
+      const fileBuffer = fs.readFileSync(filePath);
       res.writeHead(200, {
         'Content-Type': contentType,
         'Content-Length': fileBuffer.length,
@@ -205,6 +236,47 @@ export class SyncServer extends EventEmitter {
     } catch (err: any) {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end(`Internal Server Error: ${err.message}`);
+    }
+  }
+
+  private async proxyExternalUrl(targetUrl: string, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const parsed = new URL(targetUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Invalid protocol');
+        return;
+      }
+
+      const response = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': (req.headers['user-agent'] as string) || 'Mozilla/5.0 (Android; Tablet; NeoPowerPoint)'
+        }
+      });
+
+      const contentType = response.headers.get('content-type') || 'text/html';
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Content-Type', contentType);
+
+      if (contentType.includes('text/html')) {
+        let text = await response.text();
+        // Inject <base href="..."> if not present so relative resources resolve
+        if (!text.includes('<base ') && text.includes('<head>')) {
+          text = text.replace('<head>', `<head><base href="${targetUrl}">`);
+        } else if (!text.includes('<base ') && text.includes('<HEAD>')) {
+          text = text.replace('<HEAD>', `<HEAD><base href="${targetUrl}">`);
+        }
+        res.writeHead(200);
+        res.end(text);
+      } else {
+        const buffer = Buffer.from(await response.arrayBuffer());
+        res.writeHead(200, { 'Content-Length': buffer.length });
+        res.end(buffer);
+      }
+    } catch (err: any) {
+      console.warn(`[SyncServer] Proxy error for ${targetUrl}:`, err.message);
+      res.writeHead(502, { 'Content-Type': 'text/plain' });
+      res.end(`Proxy Error: ${err.message}`);
     }
   }
 
@@ -228,6 +300,16 @@ export class SyncServer extends EventEmitter {
         slideIndex: currentIndex,
         strokes
       }));
+
+      const lastDom = this.currentSlideDom.get(currentIndex);
+      if (lastDom) {
+        ws.send(JSON.stringify(lastDom));
+      }
+
+      const lastScroll = this.currentSlideScroll.get(currentIndex);
+      if (lastScroll) {
+        ws.send(JSON.stringify(lastScroll));
+      }
     }
 
     ws.on('message', (data: Buffer | string) => {
@@ -293,6 +375,18 @@ export class SyncServer extends EventEmitter {
         this.emit('slide:navigate', msg.target);
         break;
 
+      case 'slide:scroll':
+        this.currentSlideScroll.set(msg.slideIndex, msg);
+        this.emit('slide:scroll', msg);
+        this.broadcast(msg, senderWs);
+        break;
+
+      case 'slide:dom-sync':
+        this.currentSlideDom.set(msg.slideIndex, msg);
+        this.emit('slide:dom-sync', msg);
+        this.broadcast(msg, senderWs);
+        break;
+
       default:
         break;
     }
@@ -332,6 +426,33 @@ export class SyncServer extends EventEmitter {
       slideIndex: currentIndex,
       strokes
     });
+
+    // Sync any cached DOM or scroll state for this slide
+    const lastDom = this.currentSlideDom.get(currentIndex);
+    if (lastDom) {
+      this.broadcast(lastDom);
+    }
+
+    const lastScroll = this.currentSlideScroll.get(currentIndex);
+    if (lastScroll) {
+      this.broadcast(lastScroll);
+    }
+  }
+
+  /**
+   * Broadcast scroll action from host presentation to tablet clients
+   */
+  public broadcastSlideScroll(action: SlideScrollAction): void {
+    this.currentSlideScroll.set(action.slideIndex, action);
+    this.broadcast(action);
+  }
+
+  /**
+   * Broadcast DOM mutations (classes, steps, inputs) from host presentation to tablet clients
+   */
+  public broadcastSlideDom(action: SlideDomSyncAction): void {
+    this.currentSlideDom.set(action.slideIndex, action);
+    this.broadcast(action);
   }
 
   /**

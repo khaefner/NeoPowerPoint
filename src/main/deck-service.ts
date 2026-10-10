@@ -1,9 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { spawn } from 'child_process';
 import AdmZip from 'adm-zip';
 import { app } from 'electron';
 import { DeckManifest, SlideMetadata } from '../types/deck';
+import { logger } from './logger';
+import { resolvePythonCommand, getAugmentedEnv } from './python-resolver';
 
 export class DeckService {
   private activeDeckPath: string | null = null;
@@ -26,6 +29,7 @@ export class DeckService {
    * Opens a presentation folder. If no deck.json exists, scans for HTML files and creates one.
    */
   async openFolder(folderPath: string): Promise<{ deckPath: string; manifest: DeckManifest }> {
+    logger.info('DeckService', `Opening presentation folder: ${folderPath}`);
     const manifestPath = path.join(folderPath, 'deck.json');
     let manifest: DeckManifest;
 
@@ -34,10 +38,12 @@ export class DeckService {
         const raw = await fs.promises.readFile(manifestPath, 'utf-8');
         manifest = JSON.parse(raw) as DeckManifest;
       } catch (err: any) {
+        logger.error('DeckService', `Failed to parse deck.json in ${folderPath}`, err);
         throw new Error(`Failed to parse deck.json: ${err.message}`);
       }
     } else {
       // Auto-discover HTML slides
+      logger.info('DeckService', `No deck.json found in ${folderPath}, auto-discovering HTML slides...`);
       manifest = await this.autoDiscoverDeck(folderPath);
       await this.saveManifest(folderPath, manifest);
     }
@@ -47,6 +53,7 @@ export class DeckService {
     this.activeManifest = manifest;
     this.sourcePackagePath = null;
 
+    logger.info('DeckService', `Loaded deck "${manifest.title}" with ${manifest.slides.length} slides.`);
     return { deckPath: folderPath, manifest };
   }
 
@@ -54,13 +61,17 @@ export class DeckService {
    * Opens a .neopres or .zip file by extracting it into a temporary session cache.
    */
   async openPackage(packageFilePath: string): Promise<{ deckPath: string; manifest: DeckManifest }> {
+    logger.info('DeckService', `Opening presentation package: ${packageFilePath}`);
     if (!fs.existsSync(packageFilePath)) {
-      throw new Error(`Package file does not exist: ${packageFilePath}`);
+      const msg = `Package file does not exist: ${packageFilePath}`;
+      logger.error('DeckService', msg);
+      throw new Error(msg);
     }
 
     const zip = new AdmZip(packageFilePath);
     const sanitizedName = path.basename(packageFilePath, path.extname(packageFilePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
-    const extractDir = path.join(app.getPath('temp'), 'neopowerpoint', `${sanitizedName}_${Date.now()}`);
+    const tempRoot = app && typeof app.getPath === 'function' ? app.getPath('temp') : os.tmpdir();
+    const extractDir = path.join(tempRoot, 'neopowerpoint', `${sanitizedName}_${Date.now()}`);
 
     await fs.promises.mkdir(extractDir, { recursive: true });
     zip.extractAllTo(extractDir, true);
@@ -74,6 +85,7 @@ export class DeckService {
    * Exports the active or specified deck folder to a .neopres file.
    */
   async exportPackage(folderPath: string, outputFilePath: string): Promise<string> {
+    logger.info('DeckService', `Exporting package from ${folderPath} to ${outputFilePath}`);
     const zip = new AdmZip();
     zip.addLocalFolder(folderPath);
     await zip.writeZipPromise(outputFilePath);
@@ -81,83 +93,153 @@ export class DeckService {
   }
 
   /**
+   * Locates converter python scripts, handling unpacked ASAR or copying from ASAR to temp directory.
+   */
+  private async resolveConverterDir(): Promise<string> {
+    const appPath = app && typeof app.getAppPath === 'function' ? app.getAppPath() : process.cwd();
+    const candidates = [
+      path.join(__dirname, '../converter'),
+      path.join(__dirname, '../../src/converter'),
+      path.join(appPath, 'dist/converter'),
+      path.join(appPath, 'src/converter'),
+      path.join(appPath, '.agents/skills/pptx-to-neopowerpoint/scripts')
+    ];
+
+    for (const cand of candidates) {
+      if (fs.existsSync(path.join(cand, 'extract_pptx.py')) && fs.existsSync(path.join(cand, 'generate_deck.py'))) {
+        // If path is inside an ASAR archive, external Python process cannot read from within the archive
+        if (cand.includes('.asar')) {
+          const unpackedCand = cand.replace(/\.asar([/\\])/, '.asar.unpacked$1');
+          if (
+            fs.existsSync(path.join(unpackedCand, 'extract_pptx.py')) &&
+            fs.existsSync(path.join(unpackedCand, 'generate_deck.py'))
+          ) {
+            logger.info('DeckService', `Using unpacked converter scripts at: ${unpackedCand}`);
+            return unpackedCand;
+          }
+
+          // If unpacked files not on disk, extract scripts from ASAR into a temporary directory
+          const tempRoot = app && typeof app.getPath === 'function' ? app.getPath('temp') : os.tmpdir();
+          const tempScriptsDir = path.join(tempRoot, 'neopowerpoint', 'converter_scripts');
+          await fs.promises.mkdir(tempScriptsDir, { recursive: true });
+
+          for (const scriptName of ['extract_pptx.py', 'generate_deck.py']) {
+            const srcScript = path.join(cand, scriptName);
+            const destScript = path.join(tempScriptsDir, scriptName);
+            const content = await fs.promises.readFile(srcScript);
+            await fs.promises.writeFile(destScript, content, { mode: 0o755 });
+          }
+          logger.info('DeckService', `Extracted converter scripts from ASAR to temporary dir: ${tempScriptsDir}`);
+          return tempScriptsDir;
+        }
+
+        logger.info('DeckService', `Found converter scripts at: ${cand}`);
+        return cand;
+      }
+    }
+
+    const notFoundMsg = `PPTX converter scripts not found in application bundle.\nChecked locations:\n${candidates.map((c) => `  - ${c}`).join('\n')}`;
+    logger.error('DeckService', notFoundMsg);
+    throw new Error(notFoundMsg);
+  }
+
+  /**
    * Imports and converts a PowerPoint (.pptx) file into a live NeoPowerPoint presentation deck.
    */
   async importPptx(pptxFilePath: string, outputDir?: string): Promise<{ deckPath: string; manifest: DeckManifest }> {
+    logger.info('DeckService', `Starting PowerPoint import for: ${pptxFilePath}`);
     if (!fs.existsSync(pptxFilePath)) {
-      throw new Error(`PowerPoint file does not exist: ${pptxFilePath}`);
+      const msg = `PowerPoint file does not exist: ${pptxFilePath}`;
+      logger.error('DeckService', msg);
+      throw new Error(msg);
     }
 
     const sanitizedBase = path.basename(pptxFilePath, path.extname(pptxFilePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
     const targetDeckDir = outputDir || path.join(path.dirname(pptxFilePath), `${sanitizedBase}_NeoDeck`);
-    const extractTempDir = path.join(app.getPath('temp'), 'neopowerpoint', `pptx_extract_${sanitizedBase}_${Date.now()}`);
+    const tempRoot = app && typeof app.getPath === 'function' ? app.getPath('temp') : os.tmpdir();
+    const extractTempDir = path.join(tempRoot, 'neopowerpoint', `pptx_extract_${sanitizedBase}_${Date.now()}`);
 
+    logger.info('DeckService', `Creating directories: extractTemp=${extractTempDir}, targetDeckDir=${targetDeckDir}`);
     await fs.promises.mkdir(extractTempDir, { recursive: true });
     await fs.promises.mkdir(targetDeckDir, { recursive: true });
 
-    // Locate Python converter scripts
-    const candidates = [
-      path.join(__dirname, '../converter'),
-      path.join(__dirname, '../../src/converter'),
-      path.join(app.getAppPath(), 'dist/converter'),
-      path.join(app.getAppPath(), 'src/converter'),
-      path.join(app.getAppPath(), '.agents/skills/pptx-to-neopowerpoint/scripts')
-    ];
-
-    let converterDir = '';
-    for (const cand of candidates) {
-      if (fs.existsSync(path.join(cand, 'extract_pptx.py')) && fs.existsSync(path.join(cand, 'generate_deck.py'))) {
-        converterDir = cand;
-        break;
-      }
+    // 1. Resolve Python 3 executable
+    let pythonCmd: string;
+    try {
+      const py = resolvePythonCommand();
+      pythonCmd = py.command;
+      logger.info('DeckService', `Resolved Python executable: ${pythonCmd} (${py.version})`);
+    } catch (pyErr: any) {
+      logger.error('DeckService', 'Python 3 resolution failed', pyErr);
+      throw pyErr;
     }
 
-    if (!converterDir) {
-      throw new Error('PPTX converter scripts not found in application bundle');
-    }
-
+    // 2. Locate converter scripts
+    const converterDir = await this.resolveConverterDir();
     const extractScript = path.join(converterDir, 'extract_pptx.py');
     const generateScript = path.join(converterDir, 'generate_deck.py');
-    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
 
-    // 1. Run extract_pptx.py
+    // 3. Run extract_pptx.py
+    logger.info('DeckService', `Step 1: Extracting raw PowerPoint presentation data...`);
     await this.runProcess(pythonCmd, [extractScript, pptxFilePath, '--out', extractTempDir]);
 
     const extractJsonPath = path.join(extractTempDir, 'extract.json');
     if (!fs.existsSync(extractJsonPath)) {
-      throw new Error(`Failed to extract presentation data: ${extractJsonPath} was not generated`);
+      const msg = `Failed to extract presentation data: ${extractJsonPath} was not generated`;
+      logger.error('DeckService', msg);
+      throw new Error(msg);
     }
 
-    // 2. Run generate_deck.py
+    // 4. Run generate_deck.py
+    logger.info('DeckService', `Step 2: Generating HTML slides and theme.css...`);
     await this.runProcess(pythonCmd, [generateScript, '--extract', extractJsonPath, '--out', targetDeckDir]);
 
     // Clean up temporary extract folder
     try {
       await fs.promises.rm(extractTempDir, { recursive: true, force: true });
+      logger.debug('DeckService', `Cleaned up extract temporary directory: ${extractTempDir}`);
     } catch (_) {}
 
-    // 3. Open the converted deck
+    // 5. Open the converted deck
+    logger.info('DeckService', `Step 3: Opening newly generated deck at: ${targetDeckDir}`);
     return this.openFolder(targetDeckDir);
   }
 
-  private runProcess(cmd: string, args: string[]): Promise<string> {
+  private runProcess(cmd: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string> {
+    logger.info('DeckService', `Running: ${cmd} ${args.join(' ')}`);
     return new Promise((resolve, reject) => {
-      const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const proc = spawn(cmd, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: env || getAugmentedEnv()
+      });
       let stdout = '';
       let stderr = '';
 
-      proc.stdout?.on('data', (d) => { stdout += d.toString(); });
-      proc.stderr?.on('data', (d) => { stderr += d.toString(); });
+      proc.stdout?.on('data', (d) => {
+        const text = d.toString();
+        stdout += text;
+        logger.debug('DeckService:stdout', text.trim());
+      });
+
+      proc.stderr?.on('data', (d) => {
+        const text = d.toString();
+        stderr += text;
+        logger.warn('DeckService:stderr', text.trim());
+      });
 
       proc.on('error', (err) => {
+        logger.error('DeckService', `Failed to execute ${cmd}: ${err.message}`, err);
         reject(new Error(`Failed to execute ${cmd}: ${err.message}`));
       });
 
       proc.on('close', (code) => {
         if (code === 0) {
+          logger.info('DeckService', `Command completed successfully: ${cmd}`);
           resolve(stdout);
         } else {
-          reject(new Error(`Process ${cmd} exited with code ${code}:\n${stderr || stdout}`));
+          const errMsg = `Process ${cmd} exited with code ${code}:\n${stderr || stdout}`;
+          logger.error('DeckService', errMsg);
+          reject(new Error(errMsg));
         }
       });
     });
@@ -821,6 +903,15 @@ export class DeckService {
           frame.src = frame.src;
         }
       });
+
+      window.setFitMode = setFitMode;
+      window.isFitMode = function() { return isFitMode; };
+      window.updateScaling = updateScaling;
+
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('view') === 'tablet' && frame && (frame.src.startsWith('http://') || frame.src.startsWith('https://'))) {
+        frame.src = '/api/proxy?url=' + encodeURIComponent(frame.src);
+      }
 
       window.addEventListener('resize', updateScaling);
       window.addEventListener('DOMContentLoaded', updateScaling);

@@ -1,7 +1,7 @@
 import { DeckManifest, SlideMetadata } from '../types/deck';
 import { ElectronAPI } from '../preload/preload';
 import { InkOverlay } from '../common/ink-overlay';
-import { InkSyncAction } from '../types/ink';
+import { InkSyncAction, SlideScrollAction, SlideDomSyncAction } from '../types/ink';
 
 declare const window: Window & { electronAPI: ElectronAPI };
 
@@ -152,6 +152,8 @@ class PresentationApp {
     document.getElementById('menu-trans-none')?.addEventListener('click', () => this.setDeckTransition('none'));
     document.getElementById('menu-reload-slide')!.addEventListener('click', () => this.reloadCurrentSlide());
     document.getElementById('menu-help-shortcuts')!.addEventListener('click', () => this.toggleShortcuts(true));
+    document.getElementById('menu-export-logs')?.addEventListener('click', () => this.exportLogs());
+    document.getElementById('menu-open-logs-folder')?.addEventListener('click', () => this.openLogsFolder());
 
     // Empty state actions
     document.getElementById('btn-welcome-sample')!.addEventListener('click', () => this.loadSampleDeck());
@@ -177,6 +179,36 @@ class PresentationApp {
     document.getElementById('btn-close-web-modal')?.addEventListener('click', () => this.closeWebSlideModal());
     document.getElementById('btn-cancel-web-modal')?.addEventListener('click', () => this.closeWebSlideModal());
     document.getElementById('btn-confirm-web-modal')?.addEventListener('click', () => this.submitWebSlideModal());
+
+    // Error & Diagnostics Modal
+    document.getElementById('btn-close-error-modal')?.addEventListener('click', () => this.hideErrorModal());
+    document.getElementById('btn-error-dismiss')?.addEventListener('click', () => this.hideErrorModal());
+    document.getElementById('btn-error-export-logs')?.addEventListener('click', () => this.exportLogs());
+    document.getElementById('btn-error-open-folder')?.addEventListener('click', () => this.openLogsFolder());
+    document.getElementById('btn-error-copy-details')?.addEventListener('click', () => this.copyErrorDetails());
+
+    // Tablet / ADB Launch
+    document.getElementById('btn-main-adb-launch')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btn-main-adb-launch') as HTMLButtonElement;
+      if (!btn) return;
+      btn.textContent = 'Launching...';
+      try {
+        const res = await window.electronAPI.launchTabletBrowser();
+        if (res.success) {
+          btn.textContent = 'Launched! ✓';
+          this.showToast('Launched inking companion view on tablet!');
+          setTimeout(() => { btn.textContent = 'Open on Boox'; }, 2500);
+        } else {
+          btn.textContent = 'Launch Failed';
+          this.showToast(`Failed to launch on tablet: ${res.error || 'Unknown error'}`);
+          setTimeout(() => { btn.textContent = 'Open on Boox'; }, 2500);
+        }
+      } catch (err: any) {
+        btn.textContent = 'Launch Failed';
+        this.showToast(`Error: ${err.message}`);
+        setTimeout(() => { btn.textContent = 'Open on Boox'; }, 2500);
+      }
+    });
 
     // AI Designer
     document.getElementById('btn-ai-designer')?.addEventListener('click', () => this.openAIDesignerModal());
@@ -389,6 +421,22 @@ class PresentationApp {
       }
     });
 
+    window.electronAPI.onDeckImportError?.((data) => {
+      this.showErrorModal('PowerPoint Import Failed', data.error, data.details);
+    });
+
+    window.electronAPI.onAdbDevicesChanged?.((devices) => {
+      window.electronAPI.getAdbStatus?.().then((status) => {
+        this.updateAdbStatusUI(status || devices);
+      }).catch(() => {
+        this.updateAdbStatusUI(devices);
+      });
+    });
+
+    window.electronAPI.getAdbStatus?.().then((status) => {
+      this.updateAdbStatusUI(status);
+    }).catch(() => {});
+
     window.electronAPI.onSetPresentationModeEvent?.((enabled: boolean) => {
       this.isPresentationMode = enabled;
       document.body.classList.toggle('mode-presentation', enabled);
@@ -457,6 +505,11 @@ class PresentationApp {
         this.currentAnimStep = event.data.currentStep || 0;
         this.totalAnimSteps = event.data.totalSteps || 0;
         this.syncPresenterState();
+        window.electronAPI.syncSlideDom({
+          type: 'slide:dom-sync',
+          slideIndex: this.currentIndex,
+          animStep: this.currentAnimStep
+        });
       }
     });
   }
@@ -507,6 +560,262 @@ class PresentationApp {
 
       this.handleKeyDown(e);
     });
+  }
+
+  private setupIframeSyncBridge(frame: HTMLIFrameElement, doc: Document): void {
+    if ((doc as any).__neoDeckSyncAttached) return;
+    (doc as any).__neoDeckSyncAttached = true;
+
+    const slideIndex = this.currentIndex;
+
+    const getElementSelector = (el: HTMLElement, rootDoc: Document): string => {
+      if (el.id) return `#${CSS.escape(el.id)}`;
+      if (el === rootDoc.body) return 'body';
+      if (el === rootDoc.documentElement) return ':root';
+
+      if (el.className && typeof el.className === 'string') {
+        const classes = el.className.trim().split(/\s+/).filter(Boolean);
+        if (classes.length > 0) {
+          const clsSel = `${el.tagName.toLowerCase()}.${classes.map(c => CSS.escape(c)).join('.')}`;
+          try {
+            if (rootDoc.querySelectorAll(clsSel).length === 1) return clsSel;
+          } catch (_) {}
+        }
+      }
+
+      const path: string[] = [];
+      let curr: HTMLElement | null = el;
+      while (curr && curr !== rootDoc.body && curr !== rootDoc.documentElement) {
+        if (curr.id) {
+          path.unshift(`#${CSS.escape(curr.id)}`);
+          break;
+        }
+        let piece = curr.tagName.toLowerCase();
+        if (curr.parentElement) {
+          const siblings = Array.from(curr.parentElement.children).filter(c => c.tagName === curr!.tagName);
+          if (siblings.length > 1) {
+            const idx = siblings.indexOf(curr) + 1;
+            piece += `:nth-of-type(${idx})`;
+          }
+        }
+        path.unshift(piece);
+        curr = curr.parentElement;
+      }
+      return path.join(' > ') || 'body';
+    };
+
+    // 1. Throttled Scroll Synchronization
+    let scrollThrottleTimer: any = null;
+    let latestScrollAction: SlideScrollAction | null = null;
+
+    const emitScroll = (target: EventTarget | null) => {
+      if (!target || this.currentIndex !== slideIndex) return;
+      const isDocOrWin = target === doc || target === doc.documentElement || target === doc.body || target === doc.defaultView;
+      const isElement = target instanceof HTMLElement;
+
+      let selector = 'window';
+      let scrollTop = 0;
+      let scrollLeft = 0;
+      let scrollWidth = 0;
+      let scrollHeight = 0;
+      let clientWidth = 0;
+      let clientHeight = 0;
+
+      if (isDocOrWin) {
+        selector = 'window';
+        const win = doc.defaultView || window;
+        scrollTop = win.scrollY || doc.documentElement.scrollTop || doc.body?.scrollTop || 0;
+        scrollLeft = win.scrollX || doc.documentElement.scrollLeft || doc.body?.scrollLeft || 0;
+        scrollWidth = doc.documentElement.scrollWidth || 0;
+        scrollHeight = doc.documentElement.scrollHeight || 0;
+        clientWidth = win.innerWidth || doc.documentElement.clientWidth || 0;
+        clientHeight = win.innerHeight || doc.documentElement.clientHeight || 0;
+      } else if (isElement) {
+        const el = target as HTMLElement;
+        selector = getElementSelector(el, doc);
+        scrollTop = el.scrollTop;
+        scrollLeft = el.scrollLeft;
+        scrollWidth = el.scrollWidth;
+        scrollHeight = el.scrollHeight;
+        clientWidth = el.clientWidth;
+        clientHeight = el.clientHeight;
+      } else {
+        return;
+      }
+
+      const maxScrollX = Math.max(0, scrollWidth - clientWidth);
+      const maxScrollY = Math.max(0, scrollHeight - clientHeight);
+      const ratioX = maxScrollX > 0 ? scrollLeft / maxScrollX : 0;
+      const ratioY = maxScrollY > 0 ? scrollTop / maxScrollY : 0;
+
+      latestScrollAction = {
+        type: 'slide:scroll',
+        slideIndex: this.currentIndex,
+        selector,
+        scrollTop,
+        scrollLeft,
+        ratioX,
+        ratioY
+      };
+
+      if (!scrollThrottleTimer) {
+        scrollThrottleTimer = setTimeout(() => {
+          scrollThrottleTimer = null;
+          if (latestScrollAction && this.currentIndex === slideIndex) {
+            window.electronAPI.syncSlideScroll(latestScrollAction);
+          }
+        }, 30);
+      }
+    };
+
+    doc.addEventListener('scroll', (e) => emitScroll(e.target), { capture: true, passive: true });
+    if (doc.defaultView) {
+      doc.defaultView.addEventListener('scroll', (e) => emitScroll(e.target), { passive: true });
+    }
+
+    // 2. Nested Frame Scroll Observers (e.g. #web-frame inside web slides)
+    const attachToNestedFrames = () => {
+      const nestedFrames = doc.querySelectorAll('iframe');
+      nestedFrames.forEach((nested) => {
+        const setupFrame = () => {
+          try {
+            const nestedDoc = nested.contentDocument;
+            const nestedWin = nested.contentWindow;
+            if (nestedDoc && !(nestedDoc as any).__neoDeckSyncAttached) {
+              (nestedDoc as any).__neoDeckSyncAttached = true;
+              const emitNestedScroll = () => {
+                if (this.currentIndex !== slideIndex) return;
+                const win = nestedWin || nestedDoc.defaultView;
+                const scrollTop = win?.scrollY || nestedDoc.documentElement?.scrollTop || nestedDoc.body?.scrollTop || 0;
+                const scrollLeft = win?.scrollX || nestedDoc.documentElement?.scrollLeft || nestedDoc.body?.scrollLeft || 0;
+                const scrollWidth = nestedDoc.documentElement?.scrollWidth || 0;
+                const scrollHeight = nestedDoc.documentElement?.scrollHeight || 0;
+                const clientWidth = win?.innerWidth || nestedDoc.documentElement?.clientWidth || 0;
+                const clientHeight = win?.innerHeight || nestedDoc.documentElement?.clientHeight || 0;
+                const maxScrollX = Math.max(0, scrollWidth - clientWidth);
+                const maxScrollY = Math.max(0, scrollHeight - clientHeight);
+                const ratioX = maxScrollX > 0 ? scrollLeft / maxScrollX : 0;
+                const ratioY = maxScrollY > 0 ? scrollTop / maxScrollY : 0;
+                const frameSelector = nested.id ? `#${CSS.escape(nested.id)}` : 'iframe';
+
+                window.electronAPI.syncSlideScroll({
+                  type: 'slide:scroll',
+                  slideIndex: this.currentIndex,
+                  selector: frameSelector,
+                  scrollTop,
+                  scrollLeft,
+                  ratioX,
+                  ratioY
+                });
+              };
+
+              nestedDoc.addEventListener('scroll', emitNestedScroll, { capture: true, passive: true });
+              if (nestedWin) {
+                nestedWin.addEventListener('scroll', emitNestedScroll, { passive: true });
+              }
+            }
+          } catch (_) {}
+        };
+
+        setupFrame();
+        nested.addEventListener('load', setupFrame);
+      });
+    };
+    attachToNestedFrames();
+
+    // 3. Mutation Observer (Classes, Display Modes, Component states)
+    let domSyncTimer: any = null;
+    let pendingAttributes: Array<{ selector: string; name: string; value: string | null }> = [];
+    let lastBodyClass = doc.body?.className || '';
+
+    const observer = new MutationObserver((mutations) => {
+      if (this.currentIndex !== slideIndex) return;
+      let bodyClassChanged = false;
+
+      for (const m of mutations) {
+        if (m.type === 'attributes' && m.attributeName) {
+          const target = m.target as HTMLElement;
+          if (target === doc.body && m.attributeName === 'class') {
+            if (doc.body.className !== lastBodyClass) {
+              lastBodyClass = doc.body.className;
+              bodyClassChanged = true;
+            }
+          } else if (target instanceof HTMLElement) {
+            const selector = getElementSelector(target, doc);
+            pendingAttributes.push({
+              selector,
+              name: m.attributeName,
+              value: target.getAttribute(m.attributeName)
+            });
+          }
+        }
+      }
+
+      if (bodyClassChanged || pendingAttributes.length > 0) {
+        if (!domSyncTimer) {
+          domSyncTimer = setTimeout(() => {
+            domSyncTimer = null;
+            if (this.currentIndex !== slideIndex) return;
+            const payload: SlideDomSyncAction = {
+              type: 'slide:dom-sync',
+              slideIndex: this.currentIndex,
+              bodyClass: doc.body?.className,
+              attributes: pendingAttributes.length > 0 ? [...pendingAttributes] : undefined
+            };
+            pendingAttributes = [];
+            window.electronAPI.syncSlideDom(payload);
+          }, 35);
+        }
+      }
+    });
+
+    observer.observe(doc.documentElement, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ['class', 'style', 'open', 'hidden', 'aria-expanded', 'aria-hidden', 'data-state', 'data-active']
+    });
+
+    // 4. Input & Form Synchronization
+    const handleInputChange = (e: Event) => {
+      if (this.currentIndex !== slideIndex) return;
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+        const inputEl = target as HTMLInputElement;
+        const selector = getElementSelector(inputEl, doc);
+        window.electronAPI.syncSlideDom({
+          type: 'slide:dom-sync',
+          slideIndex: this.currentIndex,
+          inputs: [{
+            selector,
+            value: inputEl.value,
+            checked: inputEl.type === 'checkbox' || inputEl.type === 'radio' ? inputEl.checked : undefined
+          }]
+        });
+      }
+    };
+    doc.addEventListener('input', handleInputChange, { capture: true });
+    doc.addEventListener('change', handleInputChange, { capture: true });
+
+    // 5. Media Synchronization
+    const handleMediaEvent = (e: Event) => {
+      if (this.currentIndex !== slideIndex) return;
+      const target = e.target;
+      if (target instanceof HTMLMediaElement) {
+        const selector = getElementSelector(target, doc);
+        window.electronAPI.syncSlideDom({
+          type: 'slide:dom-sync',
+          slideIndex: this.currentIndex,
+          media: [{
+            selector,
+            currentTime: target.currentTime,
+            paused: target.paused
+          }]
+        });
+      }
+    };
+    doc.addEventListener('play', handleMediaEvent, { capture: true });
+    doc.addEventListener('pause', handleMediaEvent, { capture: true });
+    doc.addEventListener('seeked', handleMediaEvent, { capture: true });
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
@@ -614,9 +923,149 @@ class PresentationApp {
     if (res) this.loadDeck(res.deckPath, res.manifest);
   }
 
+  private currentErrorDetails: string = '';
+  private toastTimeout: any = null;
+
   async importPptx(): Promise<void> {
-    const res = await window.electronAPI.importPptxDialog();
-    if (res) this.loadDeck(res.deckPath, res.manifest);
+    const loadingOverlay = document.getElementById('import-loading-overlay');
+    try {
+      loadingOverlay?.classList.remove('hidden');
+      const res = await window.electronAPI.importPptxDialog();
+      if (res) {
+        this.loadDeck(res.deckPath, res.manifest);
+        this.showToast('PowerPoint presentation imported successfully!');
+      }
+    } catch (err: any) {
+      console.error('[NeoPowerPoint] PPTX import failed:', err);
+      this.showErrorModal(
+        'PowerPoint Import Failed',
+        err.message || 'Failed to convert PowerPoint presentation.',
+        err.stack || String(err)
+      );
+    } finally {
+      loadingOverlay?.classList.add('hidden');
+    }
+  }
+
+  async exportLogs(): Promise<void> {
+    try {
+      const res = await window.electronAPI.exportLogs();
+      if (res.success && res.filePath) {
+        this.showToast(`Logs exported successfully to:\n${res.filePath}`);
+      } else if (res.error) {
+        alert(`Failed to export logs: ${res.error}`);
+      }
+    } catch (err: any) {
+      alert(`Error exporting logs: ${err.message}`);
+    }
+  }
+
+  async openLogsFolder(): Promise<void> {
+    try {
+      const success = await window.electronAPI.openLogsFolder();
+      if (!success) {
+        this.showToast('Opened logs folder');
+      }
+    } catch (err: any) {
+      alert(`Error opening logs folder: ${err.message}`);
+    }
+  }
+
+  showErrorModal(title: string, message: string, details?: string): void {
+    const modal = document.getElementById('error-modal');
+    const titleEl = document.getElementById('error-modal-title');
+    const msgEl = document.getElementById('error-modal-message');
+    const detailsEl = document.getElementById('error-modal-details');
+
+    this.currentErrorDetails = `${message}\n\n${details || ''}`.trim();
+
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = message;
+    if (detailsEl) {
+      detailsEl.textContent = details || message;
+    }
+    modal?.classList.remove('hidden');
+  }
+
+  hideErrorModal(): void {
+    document.getElementById('error-modal')?.classList.add('hidden');
+  }
+
+  async copyErrorDetails(): Promise<void> {
+    try {
+      const diag = await window.electronAPI.getLogs();
+      const textToCopy = `=== ERROR DETAILS ===\n${this.currentErrorDetails}\n\n=== DIAGNOSTIC REPORT ===\n${diag}`;
+      await navigator.clipboard.writeText(textToCopy);
+      this.showToast('Copied full error and diagnostic details to clipboard!');
+    } catch (_) {
+      try {
+        await navigator.clipboard.writeText(this.currentErrorDetails);
+        this.showToast('Copied error details to clipboard!');
+      } catch (err: any) {
+        alert('Failed to copy error details to clipboard.');
+      }
+    }
+  }
+
+  showToast(message: string, durationMs = 4000): void {
+    const toast = document.getElementById('toast-notification');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.remove('hidden');
+    toast.style.opacity = '1';
+
+    if (this.toastTimeout) {
+      clearTimeout(this.toastTimeout);
+    }
+    this.toastTimeout = setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.classList.add('hidden'), 300);
+    }, durationMs);
+  }
+
+  updateAdbStatusUI(data: any): void {
+    const dotEl = document.getElementById('main-adb-dot');
+    const labelEl = document.getElementById('main-adb-label');
+    const btnLaunch = document.getElementById('btn-main-adb-launch') as HTMLButtonElement;
+    if (!dotEl || !labelEl || !btnLaunch) return;
+
+    const devices: any[] = Array.isArray(data) ? data : (data?.devices || []);
+    const isInstalled = data?.installed !== undefined ? data.installed : true;
+    const activeDevice = devices?.find((d: any) => d.state === 'device');
+    const unauthDevice = devices?.find((d: any) => d.state === 'unauthorized');
+    const offlineDevice = devices?.find((d: any) => d.state === 'offline');
+
+    if (activeDevice) {
+      dotEl.className = 'adb-dot connected';
+      labelEl.textContent = `${activeDevice.isBoox ? 'Boox' : 'Tablet'}: ${activeDevice.model || 'Connected'}`;
+      btnLaunch.disabled = false;
+      btnLaunch.textContent = 'Open on Boox';
+      btnLaunch.title = `Connected to ${activeDevice.model}. Click to launch inking companion view.`;
+    } else if (unauthDevice) {
+      dotEl.className = 'adb-dot unauthorized';
+      labelEl.textContent = `Boox: Unauthorized`;
+      btnLaunch.disabled = true;
+      btnLaunch.textContent = 'Allow on Tablet';
+      btnLaunch.title = `Tablet detected (${unauthDevice.model}). Please unlock tablet screen and tap "Allow USB debugging".`;
+    } else if (offlineDevice) {
+      dotEl.className = 'adb-dot unauthorized';
+      labelEl.textContent = `Boox: Offline`;
+      btnLaunch.disabled = true;
+      btnLaunch.textContent = 'Offline';
+      btnLaunch.title = `Tablet is offline. Reconnect USB cable or wake tablet screen.`;
+    } else if (!isInstalled) {
+      dotEl.className = 'adb-dot not-installed';
+      labelEl.textContent = `ADB: Not Installed`;
+      btnLaunch.disabled = true;
+      btnLaunch.textContent = 'Install ADB';
+      btnLaunch.title = `Android Debug Bridge (adb) was not found. Install via Homebrew: brew install android-platform-tools`;
+    } else {
+      dotEl.className = 'adb-dot disconnected';
+      labelEl.textContent = 'Boox: Disconnected';
+      btnLaunch.disabled = true;
+      btnLaunch.textContent = 'Open on Boox';
+      btnLaunch.title = 'No Android tablet connected via USB. Ensure USB Debugging is enabled on your Boox.';
+    }
   }
 
   async exportPackage(): Promise<void> {
@@ -842,6 +1291,7 @@ class PresentationApp {
         const doc = activeFrame.contentDocument;
         if (doc) {
           this.setupIframeKeyDownBridge(doc);
+          this.setupIframeSyncBridge(activeFrame, doc);
           if (this.isEditMode && !this.isPresentationMode) {
             this.enableEditModeFeatures();
           } else if (fromPrev) {
@@ -851,9 +1301,16 @@ class PresentationApp {
                 const state = win.getAnimState?.();
                 if (state && state.totalSteps > 0) {
                   win.goToAnimStep(state.totalSteps, false);
+                  this.currentAnimStep = state.totalSteps;
+                  this.totalAnimSteps = state.totalSteps;
+                  this.syncPresenterState();
                 }
               }
             } catch (_) {}
+          } else {
+            this.currentAnimStep = 0;
+            this.totalAnimSteps = 0;
+            this.syncPresenterState();
           }
         }
       };
@@ -928,6 +1385,7 @@ class PresentationApp {
       const doc = incomingFrame.contentDocument;
       if (doc) {
         this.setupIframeKeyDownBridge(doc);
+        this.setupIframeSyncBridge(incomingFrame, doc);
         if (this.isEditMode && !this.isPresentationMode) {
           this.enableEditModeFeatures();
         } else if (fromPrev) {
@@ -937,9 +1395,16 @@ class PresentationApp {
               const state = win.getAnimState?.();
               if (state && state.totalSteps > 0) {
                 win.goToAnimStep(state.totalSteps, false);
+                this.currentAnimStep = state.totalSteps;
+                this.totalAnimSteps = state.totalSteps;
+                this.syncPresenterState();
               }
             }
           } catch (_) {}
+        } else {
+          this.currentAnimStep = 0;
+          this.totalAnimSteps = 0;
+          this.syncPresenterState();
         }
       }
 
@@ -1024,6 +1489,13 @@ class PresentationApp {
     const cur = this.manifest.slides[this.currentIndex];
     const url = `neopres://deck/${cur.path}?t=${Date.now()}`;
     this.slideFrameEl.src = url;
+    this.slideFrameEl.onload = () => {
+      const doc = this.slideFrameEl.contentDocument;
+      if (doc) {
+        this.setupIframeKeyDownBridge(doc);
+        this.setupIframeSyncBridge(this.slideFrameEl, doc);
+      }
+    };
 
     // Also refresh the thumbnail in the sidebar
     const currentItem = this.slidesListEl.children[this.currentIndex];

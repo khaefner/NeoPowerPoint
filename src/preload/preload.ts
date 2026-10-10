@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { DeckManifest } from '../types/deck';
 import { AISettings, GenerateSlideRequest, GenerateSlideResponse } from '../types/ai';
+import { SlideScrollAction, SlideDomSyncAction } from '../types/ink';
 
 export interface ElectronAPI {
   openFolderDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
@@ -25,6 +26,10 @@ export interface ElectronAPI {
   openPresenterWindow: () => Promise<boolean>;
   closePresenterWindow: () => Promise<void>;
   syncStateToPresenter: (state: any) => void;
+  syncSlideScroll: (action: SlideScrollAction) => void;
+  syncSlideDom: (action: SlideDomSyncAction) => void;
+  onSlideScroll: (callback: (action: SlideScrollAction) => void) => () => void;
+  onSlideDomSync: (callback: (action: SlideDomSyncAction) => void) => () => void;
   onFileChanged: (callback: (data: { filePath: string; eventType: string }) => void) => () => void;
   onNavigateSlide: (callback: (index: number) => void) => () => void;
   onDeckLoadedEvent: (callback: (data: { deckPath: string; manifest: DeckManifest }) => void) => () => void;
@@ -37,6 +42,12 @@ export interface ElectronAPI {
   sendInkAction: (action: any) => void;
   getAdbStatus: () => Promise<any>;
   launchTabletBrowser: () => Promise<{ success: boolean; error?: string }>;
+  onAdbDevicesChanged: (callback: (devices: any[]) => void) => () => void;
+  exportLogs: () => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  openLogsFolder: () => Promise<boolean>;
+  getLogs: () => Promise<string>;
+  logMessage: (level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR', message: string, details?: any) => Promise<void>;
+  onDeckImportError: (callback: (data: { error: string; details?: string }) => void) => () => void;
 }
 
 const api: ElectronAPI = {
@@ -62,6 +73,18 @@ const api: ElectronAPI = {
   openPresenterWindow: () => ipcRenderer.invoke('presenter:open'),
   closePresenterWindow: () => ipcRenderer.invoke('presenter:close'),
   syncStateToPresenter: (state) => ipcRenderer.send('presenter:sync-state', state),
+  syncSlideScroll: (action) => ipcRenderer.send('slide:sync-scroll', action),
+  syncSlideDom: (action) => ipcRenderer.send('slide:sync-dom', action),
+  onSlideScroll: (callback) => {
+    const handler = (_: any, action: any) => callback(action);
+    ipcRenderer.on('slide:scroll', handler);
+    return () => ipcRenderer.removeListener('slide:scroll', handler);
+  },
+  onSlideDomSync: (callback) => {
+    const handler = (_: any, action: any) => callback(action);
+    ipcRenderer.on('slide:dom-sync', handler);
+    return () => ipcRenderer.removeListener('slide:dom-sync', handler);
+  },
 
   onFileChanged: (callback) => {
     const handler = (_: any, data: any) => callback(data);
@@ -119,6 +142,20 @@ const api: ElectronAPI = {
   sendInkAction: (action) => ipcRenderer.send('ink:host-action', action),
   getAdbStatus: () => ipcRenderer.invoke('adb:get-status'),
   launchTabletBrowser: () => ipcRenderer.invoke('adb:launch-tablet'),
+  onAdbDevicesChanged: (callback) => {
+    const handler = (_: any, devices: any[]) => callback(devices);
+    ipcRenderer.on('adb:devices-changed', handler);
+    return () => ipcRenderer.removeListener('adb:devices-changed', handler);
+  },
+  exportLogs: () => ipcRenderer.invoke('dialog:export-logs'),
+  openLogsFolder: () => ipcRenderer.invoke('dialog:open-logs-folder'),
+  getLogs: () => ipcRenderer.invoke('logger:get-logs'),
+  logMessage: (level, message, details) => ipcRenderer.invoke('logger:log', level, message, details),
+  onDeckImportError: (callback) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('deck:import-error', handler);
+    return () => ipcRenderer.removeListener('deck:import-error', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

@@ -70,6 +70,12 @@
           Presenter View
         </button>
 
+        <div class="adb-pill" id="main-adb-pill" title="Android Boox Tablet Status">
+          <span class="adb-dot disconnected" id="main-adb-dot"></span>
+          <span class="adb-label" id="main-adb-label">Boox: Disconnected</span>
+          <button id="btn-main-adb-launch" class="btn-micro adb-launch-btn" title="Launch companion inking view on connected tablet" disabled>Open on Boox</button>
+        </div>
+
         <div class="dropdown">
           <button id="btn-menu-more" class="btn-icon" title="Deck & File Menu">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
@@ -95,6 +101,9 @@
             <div class="dropdown-divider"></div>
             <button id="menu-reload-slide">🔄 Reload Slide (R)</button>
             <button id="menu-help-shortcuts">⌨️ Keyboard Shortcuts (?)</button>
+            <div class="dropdown-divider"></div>
+            <button id="menu-export-logs">📄 Export Debug Logs...</button>
+            <button id="menu-open-logs-folder">📂 Open Logs Folder</button>
           </div>
         </div>
       </div>
@@ -507,6 +516,47 @@
       Delete Slide
     </button>
   </div>
+
+  <!-- PowerPoint Import Loading Modal -->
+  <div id="import-loading-overlay" class="modal-overlay hidden" style="z-index: 500;">
+    <div class="modal-card" style="text-align: center; max-width: 440px;">
+      <div style="font-size: 2.5rem; margin-bottom: 12px; display: inline-block;">⏳</div>
+      <h3 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin-bottom: 8px;">Importing PowerPoint Presentation</h3>
+      <p style="font-size: 0.9rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 16px;">
+        Extracting slides, layouts, media assets, and typography styles. This may take a few moments...
+      </p>
+      <div class="import-progress-bar" style="background: rgba(255,255,255,0.08); border-radius: 999px; height: 6px; overflow: hidden; position: relative;">
+        <div class="import-progress-fill" style="width: 100%; height: 100%; background: var(--accent-primary);"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PowerPoint / Application Error & Diagnostics Modal -->
+  <div id="error-modal" class="modal-overlay hidden" style="z-index: 600;">
+    <div class="modal-card" style="width: 640px; max-width: 92vw;">
+      <div class="modal-header" style="margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.3rem;">⚠️</span>
+          <h3 id="error-modal-title" style="font-size: 1.15rem; font-weight: 700; color: #f87171; margin: 0;">PowerPoint Import Error</h3>
+        </div>
+        <button id="btn-close-error-modal" class="btn-icon">✕</button>
+      </div>
+      <div class="modal-body" style="margin-bottom: 20px;">
+        <p id="error-modal-message" style="font-size: 0.92rem; color: var(--text-main); margin-bottom: 12px; line-height: 1.5; font-weight: 500;"></p>
+        <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; text-transform: uppercase;">Diagnostic Details</div>
+        <pre id="error-modal-details" style="background: #020617; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px; font-family: monospace; font-size: 0.78rem; color: #cbd5e1; max-height: 220px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;"></pre>
+      </div>
+      <div class="modal-actions" style="display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;">
+        <button id="btn-error-open-folder" class="btn btn-secondary">📂 Open Logs Folder</button>
+        <button id="btn-error-copy-details" class="btn btn-secondary">📋 Copy Error Details</button>
+        <button id="btn-error-export-logs" class="btn btn-primary">📄 Export Logs...</button>
+        <button id="btn-error-dismiss" class="btn btn-secondary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Floating Popup -->
+  <div id="toast-notification" class="toast-notification hidden"></div>
 
   <script type="module" src="app.js"></script>
 </body>

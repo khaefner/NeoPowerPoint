@@ -1,4 +1,4 @@
-import { InkStroke, InkPoint, InkSyncAction } from '../types/ink';
+import { InkStroke, InkPoint, InkSyncAction, SlideScrollAction, SlideDomSyncAction } from '../types/ink';
 
 class TabletInkingClient {
   private ws: WebSocket | null = null;
@@ -38,6 +38,14 @@ class TabletInkingClient {
   private streamInterval: any = null;
   private lastErasePoint: [number, number] | null = null;
 
+  // Real-time slide presentation sync state
+  private currentAnimStep: number = 0;
+  private isFrameLoading: boolean = false;
+  private pendingScroll: SlideScrollAction | null = null;
+  private pendingDom: SlideDomSyncAction | null = null;
+  private lastScrollBySlide: Map<number, SlideScrollAction> = new Map();
+  private lastDomBySlide: Map<number, SlideDomSyncAction> = new Map();
+
   constructor() {
     this.canvas = document.getElementById('ink-canvas') as HTMLCanvasElement;
     this.ctx = this.canvas.getContext('2d', { desynchronized: true }) as CanvasRenderingContext2D;
@@ -49,6 +57,8 @@ class TabletInkingClient {
     this.slideCounterEl = document.getElementById('slide-counter')!;
     this.statusDotEl = document.getElementById('status-dot')!;
     this.statusTextEl = document.getElementById('status-text')!;
+
+    this.slideFrame.addEventListener('load', () => this.handleFrameLoad());
 
     this.initLayout();
     this.initToolbar();
@@ -632,6 +642,28 @@ class TabletInkingClient {
         }
         break;
 
+      case 'slide:scroll':
+        this.lastScrollBySlide.set(action.slideIndex, action);
+        if (action.slideIndex === this.currentSlideIndex) {
+          if (this.isFrameLoading) {
+            this.pendingScroll = action;
+          } else {
+            this.applyScroll(action);
+          }
+        }
+        break;
+
+      case 'slide:dom-sync':
+        this.lastDomBySlide.set(action.slideIndex, action);
+        if (action.slideIndex === this.currentSlideIndex) {
+          if (this.isFrameLoading) {
+            this.pendingDom = action;
+          } else {
+            this.applyDomSync(action);
+          }
+        }
+        break;
+
       default:
         break;
     }
@@ -642,8 +674,11 @@ class TabletInkingClient {
     this.lastState = state;
     this.updateLayoutSize();
 
-    const { manifest, currentIndex, totalSlides } = state;
+    const { manifest, currentIndex, totalSlides, currentAnimStep } = state;
     this.currentSlideIndex = currentIndex;
+    if (typeof currentAnimStep === 'number') {
+      this.currentAnimStep = currentAnimStep;
+    }
 
     this.deckTitleEl.textContent = manifest.title || 'NeoPowerPoint';
     this.slideCounterEl.textContent = `${currentIndex + 1} / ${totalSlides}`;
@@ -651,10 +686,231 @@ class TabletInkingClient {
     const currentSlide = manifest.slides[currentIndex];
     if (currentSlide) {
       const slideUrl = `/deck/${currentSlide.path}?view=tablet`;
-      if (this.slideFrame.src !== window.location.origin + slideUrl) {
+      const fullUrl = window.location.origin + slideUrl;
+      if (this.slideFrame.src !== fullUrl) {
+        this.isFrameLoading = true;
         this.slideFrame.src = slideUrl;
+      } else {
+        // Slide is already loaded, update anim step directly if provided
+        if (typeof currentAnimStep === 'number') {
+          this.applyAnimStep(currentAnimStep);
+        }
       }
     }
+  }
+
+  private handleFrameLoad(): void {
+    this.isFrameLoading = false;
+
+    // 1. Re-apply current animation step to newly loaded frame
+    if (typeof this.currentAnimStep === 'number') {
+      this.applyAnimStep(this.currentAnimStep);
+    }
+
+    // 2. Re-apply pending or cached DOM sync
+    const lastDom = this.pendingDom || this.lastDomBySlide.get(this.currentSlideIndex);
+    if (lastDom) {
+      this.applyDomSync(lastDom);
+      this.pendingDom = null;
+    }
+
+    // 3. Re-apply pending or cached scroll
+    const lastScroll = this.pendingScroll || this.lastScrollBySlide.get(this.currentSlideIndex);
+    if (lastScroll) {
+      setTimeout(() => {
+        this.applyScroll(lastScroll);
+      }, 60);
+      this.pendingScroll = null;
+    }
+  }
+
+  private applyAnimStep(step: number): void {
+    try {
+      const win = this.slideFrame.contentWindow as any;
+      if (win && typeof win.goToAnimStep === 'function') {
+        win.goToAnimStep(step, false);
+      }
+      win?.postMessage({
+        type: 'NEODECK_SET_STEP',
+        step: step,
+        animate: false
+      }, '*');
+    } catch (_) {}
+  }
+
+  private applyScroll(action: SlideScrollAction): void {
+    try {
+      const doc = this.slideFrame.contentDocument;
+      const win = this.slideFrame.contentWindow as any;
+      if (!doc) return;
+
+      // Handle nested iframe scroll (e.g. #web-frame inside web slides)
+      if (action.selector === '#web-frame' || action.selector === 'iframe') {
+        const nestedFrame = doc.querySelector(action.selector) as HTMLIFrameElement;
+        if (nestedFrame) {
+          try {
+            const nestedWin = nestedFrame.contentWindow;
+            const nestedDoc = nestedFrame.contentDocument;
+            if (nestedWin) {
+              nestedWin.scrollTo({
+                left: action.scrollLeft,
+                top: action.scrollTop,
+                behavior: 'instant' as any
+              });
+            }
+            if (nestedDoc) {
+              nestedDoc.documentElement.scrollTop = action.scrollTop;
+              nestedDoc.documentElement.scrollLeft = action.scrollLeft;
+              if (nestedDoc.body) {
+                nestedDoc.body.scrollTop = action.scrollTop;
+                nestedDoc.body.scrollLeft = action.scrollLeft;
+              }
+            }
+            return;
+          } catch (_) {
+            // Fallback for cross-origin iframes
+            const scaler = doc.getElementById('web-frame-scaler');
+            if (scaler) {
+              scaler.style.transform = `translateY(-${action.scrollTop}px)`;
+            }
+            return;
+          }
+        }
+      }
+
+      // Element selector in slide document
+      if (action.selector && action.selector !== 'window' && action.selector !== ':root' && action.selector !== 'body') {
+        let targetEl = doc.querySelector(action.selector) as HTMLElement;
+        if (!targetEl && action.selector === '#web-viewport') {
+          targetEl = doc.getElementById('web-viewport')!;
+        }
+        if (targetEl) {
+          const maxScrollY = targetEl.scrollHeight - targetEl.clientHeight;
+          const maxScrollX = targetEl.scrollWidth - targetEl.clientWidth;
+          if (action.ratioY !== undefined && maxScrollY > 0) {
+            targetEl.scrollTop = action.ratioY * maxScrollY;
+          } else {
+            targetEl.scrollTop = action.scrollTop;
+          }
+          if (action.ratioX !== undefined && maxScrollX > 0) {
+            targetEl.scrollLeft = action.ratioX * maxScrollX;
+          } else {
+            targetEl.scrollLeft = action.scrollLeft;
+          }
+          return;
+        }
+      }
+
+      // Window / document level scroll
+      if (win) {
+        win.scrollTo({
+          left: action.scrollLeft,
+          top: action.scrollTop,
+          behavior: 'instant' as any
+        });
+      }
+      if (doc.documentElement) {
+        doc.documentElement.scrollTop = action.scrollTop;
+        doc.documentElement.scrollLeft = action.scrollLeft;
+      }
+      if (doc.body) {
+        doc.body.scrollTop = action.scrollTop;
+        doc.body.scrollLeft = action.scrollLeft;
+      }
+    } catch (_) {}
+  }
+
+  private applyDomSync(action: SlideDomSyncAction): void {
+    try {
+      const doc = this.slideFrame.contentDocument;
+      const win = this.slideFrame.contentWindow as any;
+      if (!doc) return;
+
+      // 1. Sync bodyClass (e.g. web slide mode-fit vs mode-scroll)
+      if (typeof action.bodyClass === 'string' && doc.body) {
+        if (doc.body.className !== action.bodyClass) {
+          const wasScroll = doc.body.classList.contains('mode-scroll');
+          const isNowScroll = action.bodyClass.includes('mode-scroll');
+
+          doc.body.className = action.bodyClass;
+
+          // Call setFitMode if exposed on web slide window
+          if (typeof win?.setFitMode === 'function') {
+            win.setFitMode(!isNowScroll);
+          } else {
+            // Or toggle button if state differs
+            if (wasScroll !== isNowScroll) {
+              const toggleBtn = doc.getElementById('btn-toggle-mode');
+              toggleBtn?.click();
+            }
+          }
+
+          const scaler = doc.getElementById('web-frame-scaler');
+          if (scaler) {
+            if (isNowScroll) {
+              scaler.style.left = '0px';
+              scaler.style.top = '0px';
+              scaler.style.transform = 'none';
+              scaler.style.width = '100%';
+              scaler.style.height = '100%';
+            }
+          }
+
+          win?.dispatchEvent?.(new Event('resize'));
+        }
+      }
+
+      // 2. Sync Animation step
+      if (typeof action.animStep === 'number') {
+        this.currentAnimStep = action.animStep;
+        this.applyAnimStep(action.animStep);
+      }
+
+      // 3. Sync Attributes
+      if (action.attributes && action.attributes.length > 0) {
+        for (const attr of action.attributes) {
+          try {
+            const el = doc.querySelector(attr.selector);
+            if (el) {
+              if (attr.value === null) {
+                el.removeAttribute(attr.name);
+              } else {
+                el.setAttribute(attr.name, attr.value);
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 4. Sync Inputs
+      if (action.inputs && action.inputs.length > 0) {
+        for (const inp of action.inputs) {
+          try {
+            const el = doc.querySelector(inp.selector) as HTMLInputElement;
+            if (el) {
+              if (inp.value !== undefined) el.value = inp.value;
+              if (inp.checked !== undefined) el.checked = inp.checked;
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 5. Sync Media
+      if (action.media && action.media.length > 0) {
+        for (const m of action.media) {
+          try {
+            const el = doc.querySelector(m.selector) as HTMLMediaElement;
+            if (el) {
+              if (Math.abs(el.currentTime - m.currentTime) > 0.5) {
+                el.currentTime = m.currentTime;
+              }
+              if (m.paused && !el.paused) el.pause();
+              else if (!m.paused && el.paused) el.play().catch(() => {});
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
   }
 }
 
