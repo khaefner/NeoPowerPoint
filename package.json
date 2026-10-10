@@ -58,14 +58,14 @@
     "@types/adm-zip": "^0.5.8",
     "@types/node": "^26.6.4",
     "@types/ws": "^8.18.2",
-    "adm-zip": "^0.6.1",
-    "chokidar": "^5.0.0",
     "electron": "^44.7.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "adm-zip": "^0.6.1",
+    "chokidar": "^5.0.0",
     "ws": "^8.22.0"
   }
 }
