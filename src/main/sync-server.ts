@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 import { DeckService } from './deck-service';
 import { InkStore } from './ink-store';
-import { InkStroke, InkPoint, InkSyncAction, SlideScrollAction, SlideDomSyncAction } from '../types/ink';
+import { InkStroke, InkPoint, InkSyncAction, SlideScrollAction, SlideDomSyncAction, SlideFrameAction } from '../types/ink';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -36,6 +36,7 @@ export class SyncServer extends EventEmitter {
   private clients: Set<WebSocket> = new Set();
   private currentSlideScroll: Map<number, SlideScrollAction> = new Map();
   private currentSlideDom: Map<number, SlideDomSyncAction> = new Map();
+  private latestSlideFrame: string | null = null;
 
   constructor(deckService: DeckService, inkStore: InkStore, port: number = 8765) {
     super();
@@ -310,6 +311,14 @@ export class SyncServer extends EventEmitter {
       if (lastScroll) {
         ws.send(JSON.stringify(lastScroll));
       }
+
+      if (this.latestSlideFrame) {
+        ws.send(JSON.stringify({
+          type: 'slide:frame',
+          slideIndex: currentIndex,
+          data: this.latestSlideFrame
+        }));
+      }
     }
 
     ws.on('message', (data: Buffer | string) => {
@@ -408,10 +417,15 @@ export class SyncServer extends EventEmitter {
    * Called by Electron main process when slide state changes
    */
   public updateSlideState(state: any): void {
+    const oldIndex = this.latestState?.currentIndex;
     this.latestState = state;
     if (!state) return;
 
     const currentIndex = state.currentIndex ?? 0;
+    if (oldIndex !== undefined && oldIndex !== currentIndex) {
+      this.latestSlideFrame = null;
+    }
+
     const strokes = this.inkStore.getStrokes(currentIndex);
 
     // Broadcast state update to all tablets
@@ -437,6 +451,19 @@ export class SyncServer extends EventEmitter {
     if (lastScroll) {
       this.broadcast(lastScroll);
     }
+  }
+
+  /**
+   * Broadcast captured slide viewport frame to all tablet clients
+   */
+  public broadcastSlideFrame(data: string, slideIndex?: number): void {
+    this.latestSlideFrame = data;
+    const currentIndex = slideIndex ?? (this.latestState ? (this.latestState.currentIndex ?? 0) : 0);
+    this.broadcast({
+      type: 'slide:frame',
+      slideIndex: currentIndex,
+      data
+    });
   }
 
   /**

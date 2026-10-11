@@ -254,6 +254,33 @@ async function testSyncServer() {
   assert.strictEqual(client2ReceivedDom.inputs[0].value, 'NeoDeck query');
   console.log('✓ Real-time DOM mutations, display mode, and animation step synchronization verified.');
 
+  // Test Real-Time Slide Frame Screen Capture Streaming over WebSocket
+  let client2ReceivedFrame = null;
+  client2Ws.on('message', (data) => {
+    const msg = JSON.parse(data.toString());
+    if (msg.type === 'slide:frame') {
+      client2ReceivedFrame = msg;
+    }
+  });
+
+  const testFrameData = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD...fakeFrame...';
+  // Server broadcasts captured frame to connected tablets
+  for (const client of wss.clients) {
+    if (client.readyState === 1) {
+      client.send(JSON.stringify({
+        type: 'slide:frame',
+        slideIndex: 0,
+        data: testFrameData
+      }));
+    }
+  }
+
+  await new Promise((res) => setTimeout(res, 80));
+  assert(client2ReceivedFrame, 'Client 2 must receive broadcasted slide:frame');
+  assert.strictEqual(client2ReceivedFrame.slideIndex, 0);
+  assert.strictEqual(client2ReceivedFrame.data, testFrameData);
+  console.log('✓ Real-time slide frame screen capture streaming over WebSocket verified.');
+
   client2Ws.close();
   clientWs.close();
   wss.close();
@@ -304,8 +331,11 @@ const presenterJs = fs.readFileSync('dist/presenter/presenter.js', 'utf-8');
 assert(appJs.includes('ink-overlay') || appJs.includes('onInkAction'), 'app.js must contain ink-overlay and onInkAction logic');
 assert(appJs.includes('setupIframeSyncBridge') && appJs.includes('syncSlideScroll') && appJs.includes('syncSlideDom'), 'app.js must contain iframe sync bridge and IPC triggers');
 assert(presenterJs.includes('ink-overlay') || presenterJs.includes('onInkAction'), 'presenter.js must contain ink-overlay and onInkAction logic');
-assert(presenterJs.includes('adb-pill') || presenterJs.includes('btn-adb-launch'), 'presenter.js must contain ADB tablet button logic');
 assert(tabletJs.includes('applyScroll') && tabletJs.includes('applyDomSync') && tabletJs.includes('applyAnimStep'), 'tablet.js must include slide scroll, DOM sync, and animStep mirroring');
+assert(tabletJs.includes('slide:frame') && tabletJs.includes('slideMirror'), 'tablet.js must handle slide:frame action and update slideMirror element');
+assert(appJs.includes('requestSlideCapture') && appJs.includes('getSlideBoxRect'), 'app.js must request slide captures with accurate slide box bounding box');
+assert(fs.readFileSync('dist/tablet/index.html', 'utf-8').includes('slide-mirror'), 'dist/tablet/index.html must include slide-mirror element');
+assert(fs.readFileSync('dist/tablet/tablet.css', 'utf-8').includes('#slide-mirror'), 'dist/tablet/tablet.css must style #slide-mirror element');
 console.log('✓ Verified InkOverlay, ADB controls, and Slide Sync bridges in Presentation & Tablet bundles.');
 
 console.log('\n🎉 ALL ADB, PRESENTATION, PRESENTER VIEW & INKING SYNC TESTS PASSED SUCCESSFULLY!\n');

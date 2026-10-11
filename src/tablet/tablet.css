@@ -131,6 +131,21 @@ html, body {
   border: none;
   pointer-events: none; /* Let pointer events fall through to ink canvas */
   display: block;
+  z-index: 1;
+}
+
+#slide-mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  border: none;
+  pointer-events: none;
+  object-fit: contain;
+  display: none;
+  z-index: 2;
+  background: transparent;
 }
 
 #ink-canvas {

@@ -46,6 +46,12 @@ export interface SlideDomSyncAction {
   }>;
 }
 
+export interface SlideFrameAction {
+  type: 'slide:frame';
+  slideIndex: number;
+  data: string; // base64 data URI (data:image/jpeg;base64,...)
+}
+
 export type InkSyncAction =
   | { type: 'ink:stroke-start'; stroke: InkStroke }
   | { type: 'ink:stroke-update'; id: string; points: InkPoint[] }
@@ -56,5 +62,6 @@ export type InkSyncAction =
   | { type: 'slide:navigate'; target: number | 'next' | 'prev' }
   | { type: 'slide:state'; state: any }
   | SlideScrollAction
-  | SlideDomSyncAction;
+  | SlideDomSyncAction
+  | SlideFrameAction;
 

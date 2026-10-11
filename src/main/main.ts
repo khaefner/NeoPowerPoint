@@ -80,6 +80,112 @@ syncServer.on('ink:sync-slide', (slideIndex, strokes) => {
   broadcastToWindows('ink:action', { type: 'ink:sync-slide', slideIndex, strokes });
 });
 
+let latestSlideRect: Electron.Rectangle | null = null;
+let lastCapturedBuffer: Buffer | null = null;
+let isCapturing = false;
+let captureThrottleTimer: NodeJS.Timeout | null = null;
+let pendingCaptureRequest = false;
+let captureStreamInterval: NodeJS.Timeout | null = null;
+let isFrameSubscriptionActive = false;
+
+async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
+  if (syncServer.getConnectedClientCount() === 0) return;
+  if (isCapturing) {
+    pendingCaptureRequest = true;
+    return;
+  }
+
+  isCapturing = true;
+  try {
+    const winBounds = mainWindow.getContentBounds();
+    let rect: Electron.Rectangle | undefined;
+
+    if (latestSlideRect && latestSlideRect.width > 10 && latestSlideRect.height > 10) {
+      const x = Math.max(0, Math.min(latestSlideRect.x, winBounds.width - 1));
+      const y = Math.max(0, Math.min(latestSlideRect.y, winBounds.height - 1));
+      const w = Math.max(1, Math.min(latestSlideRect.width, winBounds.width - x));
+      const h = Math.max(1, Math.min(latestSlideRect.height, winBounds.height - y));
+      rect = { x, y, width: w, height: h };
+    }
+
+    const image = await mainWindow.webContents.capturePage(rect);
+    if (!image.isEmpty()) {
+      const buffer = image.toJPEG(75);
+      if (buffer.length > 0) {
+        if (force || !lastCapturedBuffer || !buffer.equals(lastCapturedBuffer)) {
+          lastCapturedBuffer = buffer;
+          const dataUri = 'data:image/jpeg;base64,' + buffer.toString('base64');
+          const slideIndex = latestPresenterState?.currentIndex ?? 0;
+          syncServer.broadcastSlideFrame(dataUri, slideIndex);
+        }
+      }
+    }
+  } catch (err: any) {
+    logger.warn('MainProcess', `capturePage error: ${err.message}`);
+  } finally {
+    isCapturing = false;
+    if (pendingCaptureRequest) {
+      pendingCaptureRequest = false;
+      scheduleSlideCapture(false, 30);
+    }
+  }
+}
+
+function scheduleSlideCapture(force: boolean = false, delayMs: number = 60): void {
+  if (syncServer.getConnectedClientCount() === 0) return;
+  if (captureThrottleTimer) {
+    pendingCaptureRequest = true;
+    return;
+  }
+
+  captureThrottleTimer = setTimeout(() => {
+    captureThrottleTimer = null;
+    captureAndBroadcastSlide(force);
+  }, delayMs);
+}
+
+function updateCaptureStreamingState(clientCount: number): void {
+  if (clientCount > 0) {
+    if (!captureStreamInterval) {
+      captureStreamInterval = setInterval(() => {
+        if (syncServer.getConnectedClientCount() > 0 && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+          captureAndBroadcastSlide(false);
+        }
+      }, 120);
+    }
+
+    if (!isFrameSubscriptionActive && mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.webContents.beginFrameSubscription(false, () => {
+          scheduleSlideCapture(false, 50);
+        });
+        isFrameSubscriptionActive = true;
+      } catch (err: any) {
+        logger.warn('MainProcess', `beginFrameSubscription unavailable: ${err.message}`);
+      }
+    }
+
+    scheduleSlideCapture(true, 50);
+  } else {
+    if (captureStreamInterval) {
+      clearInterval(captureStreamInterval);
+      captureStreamInterval = null;
+    }
+    if (isFrameSubscriptionActive && mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.webContents.endFrameSubscription();
+      } catch (_) {}
+      isFrameSubscriptionActive = false;
+    }
+    lastCapturedBuffer = null;
+  }
+}
+
+syncServer.on('client-count-changed', (count) => {
+  updateCaptureStreamingState(count);
+});
+
 const deckWatcher = new DeckWatcher((filePath, eventType) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('deck:file-changed', { filePath, eventType });
@@ -116,7 +222,14 @@ function createMainWindow(): void {
 
   mainWindow.loadURL('neopres://deck/renderer/index.html');
 
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (syncServer.getConnectedClientCount() > 0) {
+      updateCaptureStreamingState(syncServer.getConnectedClientCount());
+    }
+  });
+
   mainWindow.on('closed', () => {
+    updateCaptureStreamingState(0);
     mainWindow = null;
     if (presenterWindow && !presenterWindow.isDestroyed()) {
       presenterWindow.close();
@@ -644,11 +757,30 @@ ipcMain.handle('presenter:close', async () => {
 });
 
 ipcMain.on('presenter:sync-state', (_, state) => {
+  const oldIndex = latestPresenterState?.currentIndex;
   latestPresenterState = state;
   if (presenterWindow && !presenterWindow.isDestroyed()) {
     presenterWindow.webContents.send('presenter:state-update', state);
   }
   syncServer.updateSlideState(state);
+  if (oldIndex !== state?.currentIndex) {
+    lastCapturedBuffer = null;
+    scheduleSlideCapture(true, 150);
+    setTimeout(() => scheduleSlideCapture(true, 400), 400);
+  } else {
+    scheduleSlideCapture(false, 50);
+  }
+});
+
+ipcMain.on('slide:update-rect', (_, rect) => {
+  latestSlideRect = rect;
+});
+
+ipcMain.on('slide:request-capture', (_, rect) => {
+  if (rect) {
+    latestSlideRect = rect;
+  }
+  scheduleSlideCapture(false, 30);
 });
 
 ipcMain.on('ink:host-action', (event, action: InkSyncAction) => {

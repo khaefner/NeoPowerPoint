@@ -26,6 +26,8 @@ export interface ElectronAPI {
   openPresenterWindow: () => Promise<boolean>;
   closePresenterWindow: () => Promise<void>;
   syncStateToPresenter: (state: any) => void;
+  requestSlideCapture: (rect?: { x: number; y: number; width: number; height: number }) => void;
+  updateSlideRect: (rect: { x: number; y: number; width: number; height: number }) => void;
   syncSlideScroll: (action: SlideScrollAction) => void;
   syncSlideDom: (action: SlideDomSyncAction) => void;
   onSlideScroll: (callback: (action: SlideScrollAction) => void) => () => void;
@@ -73,6 +75,8 @@ const api: ElectronAPI = {
   openPresenterWindow: () => ipcRenderer.invoke('presenter:open'),
   closePresenterWindow: () => ipcRenderer.invoke('presenter:close'),
   syncStateToPresenter: (state) => ipcRenderer.send('presenter:sync-state', state),
+  requestSlideCapture: (rect) => ipcRenderer.send('slide:request-capture', rect),
+  updateSlideRect: (rect) => ipcRenderer.send('slide:update-rect', rect),
   syncSlideScroll: (action) => ipcRenderer.send('slide:sync-scroll', action),
   syncSlideDom: (action) => ipcRenderer.send('slide:sync-dom', action),
   onSlideScroll: (callback) => {

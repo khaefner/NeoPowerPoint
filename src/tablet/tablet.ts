@@ -1,4 +1,4 @@
-import { InkStroke, InkPoint, InkSyncAction, SlideScrollAction, SlideDomSyncAction } from '../types/ink';
+import { InkStroke, InkPoint, InkSyncAction, SlideScrollAction, SlideDomSyncAction, SlideFrameAction } from '../types/ink';
 
 class TabletInkingClient {
   private ws: WebSocket | null = null;
@@ -9,6 +9,7 @@ class TabletInkingClient {
   private ctx: CanvasRenderingContext2D;
   private slideScaler: HTMLElement;
   private slideFrame: HTMLIFrameElement;
+  private slideMirror: HTMLImageElement;
   private viewportContainer: HTMLElement;
   private updateLayoutSize: () => void = () => {};
 
@@ -51,6 +52,7 @@ class TabletInkingClient {
     this.ctx = this.canvas.getContext('2d', { desynchronized: true }) as CanvasRenderingContext2D;
     this.slideScaler = document.getElementById('slide-scaler')!;
     this.slideFrame = document.getElementById('slide-frame') as HTMLIFrameElement;
+    this.slideMirror = document.getElementById('slide-mirror') as HTMLImageElement;
     this.viewportContainer = document.getElementById('viewport-container')!;
 
     this.deckTitleEl = document.getElementById('deck-title')!;
@@ -89,6 +91,11 @@ class TabletInkingClient {
 
       this.slideFrame.style.width = `${baseW}px`;
       this.slideFrame.style.height = `${baseH}px`;
+
+      if (this.slideMirror) {
+        this.slideMirror.style.width = `${baseW}px`;
+        this.slideMirror.style.height = `${baseH}px`;
+      }
 
       // Set canvas internal resolution to match base slide coordinate system exactly
       if (this.canvas.width !== baseW || this.canvas.height !== baseH) {
@@ -664,6 +671,15 @@ class TabletInkingClient {
         }
         break;
 
+      case 'slide:frame':
+        if (action.slideIndex === this.currentSlideIndex || action.slideIndex === undefined) {
+          if (this.slideMirror) {
+            this.slideMirror.src = action.data;
+            this.slideMirror.style.display = 'block';
+          }
+        }
+        break;
+
       default:
         break;
     }
@@ -690,6 +706,10 @@ class TabletInkingClient {
       if (this.slideFrame.src !== fullUrl) {
         this.isFrameLoading = true;
         this.slideFrame.src = slideUrl;
+        if (this.slideMirror) {
+          this.slideMirror.style.display = 'none';
+          this.slideMirror.src = '';
+        }
       } else {
         // Slide is already loaded, update anim step directly if provided
         if (typeof currentAnimStep === 'number') {
