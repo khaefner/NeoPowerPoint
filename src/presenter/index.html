@@ -51,8 +51,12 @@
           <div class="panel-title-group">
             <span class="panel-badge">CURRENT SLIDE</span>
             <span id="current-slide-name" class="panel-subtext">Slide Title</span>
+            <span id="live-audience-sync-badge" class="badge-audience-live" title="Live bidirectional synchronization with Audience Presentation">
+              <span class="live-pulse-dot"></span> AUDIENCE SYNCED
+            </span>
           </div>
           <div class="panel-ink-tools">
+            <button id="btn-toggle-mirror" class="btn-micro active" title="Toggle Real-Time Audience Screen Mirror">👁️ Audience View</button>
             <button id="btn-p-ink-undo" class="btn-micro" title="Undo Ink Stroke">↩ Undo</button>
             <button id="btn-p-ink-clear" class="btn-micro" title="Clear Slide Ink">🗑 Clear Ink</button>
           </div>
@@ -60,6 +64,7 @@
         <div class="preview-viewport" id="current-viewport">
           <div class="preview-scaler" id="current-scaler">
             <iframe id="current-frame" class="preview-iframe"></iframe>
+            <img id="current-mirror" class="preview-mirror" alt="Live Audience Screen" style="display: none;">
           </div>
         </div>
       </section>

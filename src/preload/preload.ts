@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { DeckManifest } from '../types/deck';
 import { AISettings, GenerateSlideRequest, GenerateSlideResponse } from '../types/ai';
-import { SlideScrollAction, SlideDomSyncAction } from '../types/ink';
+import { SlideScrollAction, SlideDomSyncAction, SlideInteractionAction } from '../types/ink';
 
 export interface ElectronAPI {
   openFolderDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
@@ -30,6 +30,8 @@ export interface ElectronAPI {
   updateSlideRect: (rect: { x: number; y: number; width: number; height: number }) => void;
   syncSlideScroll: (action: SlideScrollAction) => void;
   syncSlideDom: (action: SlideDomSyncAction) => void;
+  sendInteraction: (action: SlideInteractionAction) => void;
+  onInteraction: (callback: (action: SlideInteractionAction) => void) => () => void;
   onSlideScroll: (callback: (action: SlideScrollAction) => void) => () => void;
   onSlideDomSync: (callback: (action: SlideDomSyncAction) => void) => () => void;
   onFileChanged: (callback: (data: { filePath: string; eventType: string }) => void) => () => void;
@@ -79,6 +81,12 @@ const api: ElectronAPI = {
   updateSlideRect: (rect) => ipcRenderer.send('slide:update-rect', rect),
   syncSlideScroll: (action) => ipcRenderer.send('slide:sync-scroll', action),
   syncSlideDom: (action) => ipcRenderer.send('slide:sync-dom', action),
+  sendInteraction: (action) => ipcRenderer.send('slide:interaction', action),
+  onInteraction: (callback) => {
+    const handler = (_: any, action: any) => callback(action);
+    ipcRenderer.on('slide:interaction', handler);
+    return () => ipcRenderer.removeListener('slide:interaction', handler);
+  },
   onSlideScroll: (callback) => {
     const handler = (_: any, action: any) => callback(action);
     ipcRenderer.on('slide:scroll', handler);

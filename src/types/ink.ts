@@ -52,6 +52,16 @@ export interface SlideFrameAction {
   data: string; // base64 data URI (data:image/jpeg;base64,...)
 }
 
+export interface SlideInteractionAction {
+  type: 'slide:interaction';
+  slideIndex: number;
+  actionType: 'click' | 'step';
+  selector?: string;
+  normX?: number; // 0..1 normalized X in slide container
+  normY?: number; // 0..1 normalized Y in slide container
+  step?: number;
+}
+
 export type InkSyncAction =
   | { type: 'ink:stroke-start'; stroke: InkStroke }
   | { type: 'ink:stroke-update'; id: string; points: InkPoint[] }
@@ -63,5 +73,7 @@ export type InkSyncAction =
   | { type: 'slide:state'; state: any }
   | SlideScrollAction
   | SlideDomSyncAction
-  | SlideFrameAction;
+  | SlideFrameAction
+  | SlideInteractionAction;
+
 

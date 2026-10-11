@@ -10,7 +10,7 @@ import { AISettings, GenerateSlideRequest } from '../types/ai';
 import { ADBService } from './adb-service';
 import { SyncServer } from './sync-server';
 import { InkStore } from './ink-store';
-import { InkSyncAction, SlideScrollAction, SlideDomSyncAction } from '../types/ink';
+import { InkSyncAction, SlideScrollAction, SlideDomSyncAction, SlideInteractionAction } from '../types/ink';
 import { logger } from './logger';
 
 process.on('uncaughtException', (err) => {
@@ -89,9 +89,13 @@ let captureStreamInterval: NodeJS.Timeout | null = null;
 let isFrameSubscriptionActive = false;
 let captureTimeoutTimer: NodeJS.Timeout | null = null;
 
+function hasCaptureConsumer(): boolean {
+  return syncServer.getConnectedClientCount() > 0 || (presenterWindow !== null && !presenterWindow.isDestroyed());
+}
+
 async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
-  if (syncServer.getConnectedClientCount() === 0) return;
+  if (!hasCaptureConsumer()) return;
   if (isCapturing) {
     pendingCaptureRequest = true;
     return;
@@ -130,6 +134,13 @@ async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
           const dataUri = 'data:image/jpeg;base64,' + buffer.toString('base64');
           const slideIndex = latestPresenterState?.currentIndex ?? 0;
           syncServer.broadcastSlideFrame(dataUri, slideIndex);
+          if (presenterWindow && !presenterWindow.isDestroyed()) {
+            presenterWindow.webContents.send('slide:frame', {
+              type: 'slide:frame',
+              slideIndex,
+              data: dataUri
+            });
+          }
         }
       }
     }
@@ -149,7 +160,7 @@ async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
 }
 
 function scheduleSlideCapture(force: boolean = false, delayMs: number = 60): void {
-  if (syncServer.getConnectedClientCount() === 0) return;
+  if (!hasCaptureConsumer()) return;
   if (captureThrottleTimer) {
     pendingCaptureRequest = true;
     return;
@@ -161,12 +172,13 @@ function scheduleSlideCapture(force: boolean = false, delayMs: number = 60): voi
   }, delayMs);
 }
 
-function updateCaptureStreamingState(clientCount: number): void {
-  logger.info('MainProcess', `updateCaptureStreamingState called, clientCount=${clientCount}`);
-  if (clientCount > 0) {
+function updateCaptureStreamingState(): void {
+  const active = hasCaptureConsumer();
+  logger.info('MainProcess', `updateCaptureStreamingState: active=${active} (tablets: ${syncServer.getConnectedClientCount()}, presenter: ${!!presenterWindow})`);
+  if (active) {
     if (!captureStreamInterval) {
       captureStreamInterval = setInterval(() => {
-        if (syncServer.getConnectedClientCount() > 0 && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+        if (hasCaptureConsumer() && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
           captureAndBroadcastSlide(false);
         }
       }, 120);
@@ -203,8 +215,8 @@ function updateCaptureStreamingState(clientCount: number): void {
   }
 }
 
-syncServer.on('client-count-changed', (count) => {
-  updateCaptureStreamingState(count);
+syncServer.on('client-count-changed', () => {
+  updateCaptureStreamingState();
 });
 
 const deckWatcher = new DeckWatcher((filePath, eventType) => {
@@ -244,14 +256,12 @@ function createMainWindow(): void {
   mainWindow.loadURL('neopres://deck/renderer/index.html');
 
   mainWindow.webContents.on('did-finish-load', () => {
-    if (syncServer.getConnectedClientCount() > 0) {
-      updateCaptureStreamingState(syncServer.getConnectedClientCount());
-    }
+    updateCaptureStreamingState();
   });
 
   mainWindow.on('closed', () => {
-    updateCaptureStreamingState(0);
     mainWindow = null;
+    updateCaptureStreamingState();
     if (presenterWindow && !presenterWindow.isDestroyed()) {
       presenterWindow.close();
     }
@@ -324,10 +334,12 @@ function openPresenterWindow(): boolean {
     if (presenterWindow && !presenterWindow.isDestroyed()) {
       presenterWindow.webContents.send('adb:devices-changed', adbService.getStatus().devices);
     }
+    updateCaptureStreamingState();
   });
 
   presenterWindow.on('closed', () => {
     presenterWindow = null;
+    updateCaptureStreamingState();
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isFullScreen()) {
         mainWindow.setFullScreen(false);
@@ -818,16 +830,31 @@ ipcMain.on('ink:host-action', (event, action: InkSyncAction) => {
   }
 });
 
-ipcMain.on('slide:sync-scroll', (_, action: SlideScrollAction) => {
+ipcMain.on('slide:interaction', (event, action: SlideInteractionAction) => {
+  if (mainWindow && event.sender !== mainWindow.webContents && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('slide:interaction', action);
+  }
+  if (presenterWindow && event.sender !== presenterWindow.webContents && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('slide:interaction', action);
+  }
+});
+
+ipcMain.on('slide:sync-scroll', (event, action: SlideScrollAction) => {
   syncServer.broadcastSlideScroll(action);
-  if (presenterWindow && !presenterWindow.isDestroyed()) {
+  if (mainWindow && event.sender !== mainWindow.webContents && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('slide:scroll', action);
+  }
+  if (presenterWindow && event.sender !== presenterWindow.webContents && !presenterWindow.isDestroyed()) {
     presenterWindow.webContents.send('slide:scroll', action);
   }
 });
 
-ipcMain.on('slide:sync-dom', (_, action: SlideDomSyncAction) => {
+ipcMain.on('slide:sync-dom', (event, action: SlideDomSyncAction) => {
   syncServer.broadcastSlideDom(action);
-  if (presenterWindow && !presenterWindow.isDestroyed()) {
+  if (mainWindow && event.sender !== mainWindow.webContents && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('slide:dom-sync', action);
+  }
+  if (presenterWindow && event.sender !== presenterWindow.webContents && !presenterWindow.isDestroyed()) {
     presenterWindow.webContents.send('slide:dom-sync', action);
   }
 });

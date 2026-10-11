@@ -1,5 +1,5 @@
 import { InkOverlay } from '../common/ink-overlay';
-import { InkSyncAction } from '../types/ink';
+import { InkSyncAction, SlideScrollAction, SlideDomSyncAction, SlideInteractionAction } from '../types/ink';
 
 declare global {
   interface Window {
@@ -10,6 +10,13 @@ declare global {
       prevSlide: () => void;
       onInkAction: (callback: (action: InkSyncAction) => void) => () => void;
       sendInkAction: (action: InkSyncAction) => void;
+      sendInteraction: (action: SlideInteractionAction) => void;
+      onInteraction: (callback: (action: SlideInteractionAction) => void) => () => void;
+      sendSlideScroll: (action: SlideScrollAction) => void;
+      onSlideScroll: (callback: (action: SlideScrollAction) => void) => () => void;
+      sendSlideDom: (action: SlideDomSyncAction) => void;
+      onSlideDomSync: (callback: (action: SlideDomSyncAction) => void) => () => void;
+      onSlideFrame: (callback: (frame: { slideIndex: number; data: string }) => void) => () => void;
       getAdbStatus: () => Promise<any>;
       launchTabletBrowser: () => Promise<{ success: boolean; error?: string }>;
       onAdbDevicesChanged: (callback: (devices: any[]) => void) => () => void;
@@ -37,6 +44,21 @@ const currentSlideNameEl = document.getElementById('current-slide-name')!;
 const currentViewportEl = document.getElementById('current-viewport')!;
 const currentScalerEl = document.getElementById('current-scaler')!;
 const currentFrameEl = document.getElementById('current-frame') as HTMLIFrameElement;
+const currentMirrorEl = document.getElementById('current-mirror') as HTMLImageElement;
+const liveAudienceSyncBadge = document.getElementById('live-audience-sync-badge');
+const btnToggleMirror = document.getElementById('btn-toggle-mirror');
+let isMirrorEnabled = true;
+let lastMirroredFrame: string | null = null;
+
+if (btnToggleMirror) {
+  btnToggleMirror.addEventListener('click', () => {
+    isMirrorEnabled = !isMirrorEnabled;
+    btnToggleMirror.classList.toggle('active', isMirrorEnabled);
+    if (currentMirrorEl) {
+      currentMirrorEl.style.display = isMirrorEnabled && lastMirroredFrame ? 'block' : 'none';
+    }
+  });
+}
 
 const nextSlideNameEl = document.getElementById('next-slide-name')!;
 const nextViewportEl = document.getElementById('next-viewport')!;
@@ -189,7 +211,13 @@ function renderState(state: any) {
     const curUrl = `neopres://deck/${currentSlide.path}?view=presenter_cur`;
     if (currentFrameEl.src !== curUrl) {
       currentFrameEl.src = curUrl;
+      lastMirroredFrame = null;
+      if (currentMirrorEl) currentMirrorEl.style.display = 'none';
       currentFrameEl.onload = () => {
+        const doc = currentFrameEl.contentDocument;
+        if (doc) {
+          setupPresenterInteractionBridge(currentFrameEl, doc);
+        }
         try {
           if (typeof currentAnimStep === 'number') {
             currentFrameEl.contentWindow?.postMessage({
@@ -201,6 +229,10 @@ function renderState(state: any) {
         } catch (_) {}
       };
     } else {
+      const doc = currentFrameEl.contentDocument;
+      if (doc) {
+        setupPresenterInteractionBridge(currentFrameEl, doc);
+      }
       try {
         if (typeof currentAnimStep === 'number') {
           currentFrameEl.contentWindow?.postMessage({
@@ -368,5 +400,418 @@ btnAdbLaunch.addEventListener('click', async () => {
   } else {
     btnAdbLaunch.textContent = 'Launch Failed';
     setTimeout(() => { btnAdbLaunch.textContent = 'Open on Boox'; }, 2500);
+  }
+});
+
+// --- Two-Way Presenter & Presentation Synchronization ---
+
+function getElementSelector(el: HTMLElement, rootDoc: Document): string {
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  if (el === rootDoc.body) return 'body';
+  if (el === rootDoc.documentElement) return ':root';
+
+  if (el.className && typeof el.className === 'string') {
+    const classes = el.className.trim().split(/\s+/).filter(Boolean);
+    if (classes.length > 0) {
+      const clsSel = `${el.tagName.toLowerCase()}.${classes.map(c => CSS.escape(c)).join('.')}`;
+      try {
+        if (rootDoc.querySelectorAll(clsSel).length === 1) return clsSel;
+      } catch (_) {}
+    }
+  }
+
+  const path: string[] = [];
+  let curr: HTMLElement | null = el;
+  while (curr && curr !== rootDoc.body && curr !== rootDoc.documentElement) {
+    if (curr.id) {
+      path.unshift(`#${CSS.escape(curr.id)}`);
+      break;
+    }
+    let piece = curr.tagName.toLowerCase();
+    if (curr.parentElement) {
+      const siblings = Array.from(curr.parentElement.children).filter(c => c.tagName === curr!.tagName);
+      if (siblings.length > 1) {
+        const idx = siblings.indexOf(curr) + 1;
+        piece += `:nth-of-type(${idx})`;
+      }
+    }
+    path.unshift(piece);
+    curr = curr.parentElement;
+  }
+  return path.join(' > ') || 'body';
+}
+
+function setupPresenterKeyDownBridge(iframeDoc: Document): void {
+  iframeDoc.addEventListener('keydown', (e: KeyboardEvent) => {
+    const activeEl = iframeDoc.activeElement as HTMLElement;
+    const isEditing = activeEl && (activeEl.isContentEditable || activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
+    if (isEditing) {
+      if (e.key === 'Escape') activeEl.blur();
+      return;
+    }
+
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+      e.preventDefault();
+      window.presenterAPI.nextSlide();
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      e.preventDefault();
+      window.presenterAPI.prevSlide();
+    }
+  });
+}
+
+function setupPresenterInteractionBridge(frame: HTMLIFrameElement, doc: Document): void {
+  if (!doc || (doc as any).__presenterSyncAttached) return;
+  (doc as any).__presenterSyncAttached = true;
+
+  const slideIndex = currentState?.currentIndex ?? 0;
+
+  setupPresenterKeyDownBridge(doc);
+
+  // 1. Click Interaction Forwarding
+  doc.addEventListener('click', (e: MouseEvent) => {
+    if ((e as any).__isRemoteSync) return;
+    const target = e.target as HTMLElement;
+    if (!target) return;
+
+    const selector = getElementSelector(target, doc);
+    const rect = doc.documentElement?.getBoundingClientRect();
+    const normX = rect && rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
+    const normY = rect && rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+
+    window.presenterAPI.sendInteraction({
+      type: 'slide:interaction',
+      slideIndex: currentState?.currentIndex ?? slideIndex,
+      actionType: 'click',
+      selector,
+      normX,
+      normY
+    });
+  }, { capture: true, passive: true });
+
+  // 2. Throttled Scroll Forwarding
+  let scrollThrottle: any = null;
+  const emitScroll = (target: any) => {
+    if (!target) return;
+    if (scrollThrottle) return;
+    scrollThrottle = setTimeout(() => {
+      scrollThrottle = null;
+    }, 25);
+
+    const isDocOrWin = target === doc || target === doc.defaultView || target === doc.documentElement || target === doc.body;
+    let selector = 'window';
+    let scrollTop = 0;
+    let scrollLeft = 0;
+    let ratioX = 0;
+    let ratioY = 0;
+
+    if (isDocOrWin) {
+      const win = doc.defaultView || window;
+      scrollTop = win.scrollY || doc.documentElement.scrollTop || doc.body?.scrollTop || 0;
+      scrollLeft = win.scrollX || doc.documentElement.scrollLeft || doc.body?.scrollLeft || 0;
+      const maxScrollX = Math.max(0, doc.documentElement.scrollWidth - win.innerWidth);
+      const maxScrollY = Math.max(0, doc.documentElement.scrollHeight - win.innerHeight);
+      ratioX = maxScrollX > 0 ? scrollLeft / maxScrollX : 0;
+      ratioY = maxScrollY > 0 ? scrollTop / maxScrollY : 0;
+    } else if (target instanceof HTMLElement) {
+      selector = getElementSelector(target, doc);
+      scrollTop = target.scrollTop;
+      scrollLeft = target.scrollLeft;
+      const maxScrollX = Math.max(0, target.scrollWidth - target.clientWidth);
+      const maxScrollY = Math.max(0, target.scrollHeight - target.clientHeight);
+      ratioX = maxScrollX > 0 ? scrollLeft / maxScrollX : 0;
+      ratioY = maxScrollY > 0 ? scrollTop / maxScrollY : 0;
+    } else {
+      return;
+    }
+
+    window.presenterAPI.sendSlideScroll({
+      type: 'slide:scroll',
+      slideIndex: currentState?.currentIndex ?? slideIndex,
+      selector,
+      scrollTop,
+      scrollLeft,
+      ratioX,
+      ratioY
+    });
+  };
+
+  doc.addEventListener('scroll', (e) => emitScroll(e.target), { capture: true, passive: true });
+  if (doc.defaultView) {
+    doc.defaultView.addEventListener('scroll', (e) => emitScroll(e.target), { passive: true });
+  }
+
+  // Nested frame scrolling (e.g. #web-frame inside web slides)
+  const attachNested = () => {
+    doc.querySelectorAll('iframe').forEach(nested => {
+      const setupNested = () => {
+        try {
+          const nDoc = nested.contentDocument;
+          const nWin = nested.contentWindow;
+          if (nDoc && !(nDoc as any).__presenterNestedAttached) {
+            (nDoc as any).__presenterNestedAttached = true;
+            const emitNested = () => {
+              const win = nWin || nDoc.defaultView;
+              const scrollTop = win?.scrollY || nDoc.documentElement?.scrollTop || 0;
+              const scrollLeft = win?.scrollX || nDoc.documentElement?.scrollLeft || 0;
+              const maxScrollX = Math.max(0, nDoc.documentElement.scrollWidth - (win?.innerWidth || 0));
+              const maxScrollY = Math.max(0, nDoc.documentElement.scrollHeight - (win?.innerHeight || 0));
+              window.presenterAPI.sendSlideScroll({
+                type: 'slide:scroll',
+                slideIndex: currentState?.currentIndex ?? slideIndex,
+                selector: nested.id ? `#${CSS.escape(nested.id)}` : 'iframe',
+                scrollTop,
+                scrollLeft,
+                ratioX: maxScrollX > 0 ? scrollLeft / maxScrollX : 0,
+                ratioY: maxScrollY > 0 ? scrollTop / maxScrollY : 0,
+              });
+            };
+            nDoc.addEventListener('scroll', emitNested, { capture: true, passive: true });
+            if (nWin) nWin.addEventListener('scroll', emitNested, { passive: true });
+          }
+        } catch (_) {}
+      };
+      setupNested();
+      nested.addEventListener('load', setupNested);
+    });
+  };
+  attachNested();
+
+  // 3. Form Input Forwarding
+  const handleInput = (e: Event) => {
+    const target = e.target as HTMLElement;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+      const inputEl = target as HTMLInputElement;
+      const selector = getElementSelector(inputEl, doc);
+      window.presenterAPI.sendSlideDom({
+        type: 'slide:dom-sync',
+        slideIndex: currentState?.currentIndex ?? slideIndex,
+        inputs: [{
+          selector,
+          value: inputEl.value,
+          checked: inputEl.type === 'checkbox' || inputEl.type === 'radio' ? inputEl.checked : undefined
+        }]
+      });
+    }
+  };
+  doc.addEventListener('input', handleInput, { capture: true });
+  doc.addEventListener('change', handleInput, { capture: true });
+
+  // 4. Media Events Forwarding
+  const handleMedia = (e: Event) => {
+    const target = e.target;
+    if (target instanceof HTMLMediaElement) {
+      const selector = getElementSelector(target, doc);
+      window.presenterAPI.sendSlideDom({
+        type: 'slide:dom-sync',
+        slideIndex: currentState?.currentIndex ?? slideIndex,
+        media: [{
+          selector,
+          currentTime: target.currentTime,
+          paused: target.paused
+        }]
+      });
+    }
+  };
+  doc.addEventListener('play', handleMedia, { capture: true });
+  doc.addEventListener('pause', handleMedia, { capture: true });
+  doc.addEventListener('seeked', handleMedia, { capture: true });
+}
+
+function applyScrollToCurrent(action: SlideScrollAction): void {
+  try {
+    const doc = currentFrameEl.contentDocument;
+    const win = currentFrameEl.contentWindow as any;
+    if (!doc) return;
+
+    if (action.selector === '#web-frame' || action.selector === 'iframe') {
+      const nestedFrame = doc.querySelector(action.selector) as HTMLIFrameElement;
+      if (nestedFrame) {
+        try {
+          const nestedWin = nestedFrame.contentWindow;
+          const nestedDoc = nestedFrame.contentDocument;
+          if (nestedWin) {
+            nestedWin.scrollTo({ left: action.scrollLeft, top: action.scrollTop, behavior: 'instant' as any });
+          }
+          if (nestedDoc) {
+            nestedDoc.documentElement.scrollTop = action.scrollTop;
+            nestedDoc.documentElement.scrollLeft = action.scrollLeft;
+            if (nestedDoc.body) {
+              nestedDoc.body.scrollTop = action.scrollTop;
+              nestedDoc.body.scrollLeft = action.scrollLeft;
+            }
+          }
+          return;
+        } catch (_) {
+          const scaler = doc.getElementById('web-frame-scaler');
+          if (scaler) scaler.style.transform = `translateY(-${action.scrollTop}px)`;
+          return;
+        }
+      }
+    }
+
+    if (action.selector && action.selector !== 'window' && action.selector !== ':root' && action.selector !== 'body') {
+      let targetEl = doc.querySelector(action.selector) as HTMLElement;
+      if (!targetEl && action.selector === '#web-viewport') {
+        targetEl = doc.getElementById('web-viewport')!;
+      }
+      if (targetEl) {
+        const maxScrollY = targetEl.scrollHeight - targetEl.clientHeight;
+        const maxScrollX = targetEl.scrollWidth - targetEl.clientWidth;
+        targetEl.scrollTop = action.ratioY !== undefined && maxScrollY > 0 ? action.ratioY * maxScrollY : action.scrollTop;
+        targetEl.scrollLeft = action.ratioX !== undefined && maxScrollX > 0 ? action.ratioX * maxScrollX : action.scrollLeft;
+        return;
+      }
+    }
+
+    if (win) {
+      win.scrollTo({ left: action.scrollLeft, top: action.scrollTop, behavior: 'instant' as any });
+    }
+    if (doc.documentElement) {
+      doc.documentElement.scrollTop = action.scrollTop;
+      doc.documentElement.scrollLeft = action.scrollLeft;
+    }
+    if (doc.body) {
+      doc.body.scrollTop = action.scrollTop;
+      doc.body.scrollLeft = action.scrollLeft;
+    }
+  } catch (_) {}
+}
+
+function applyDomSyncToCurrent(action: SlideDomSyncAction): void {
+  try {
+    const doc = currentFrameEl.contentDocument;
+    const win = currentFrameEl.contentWindow as any;
+    if (!doc) return;
+
+    if (typeof action.bodyClass === 'string' && doc.body) {
+      if (doc.body.className !== action.bodyClass) {
+        doc.body.className = action.bodyClass;
+        if (typeof win?.setFitMode === 'function') {
+          win.setFitMode(!action.bodyClass.includes('mode-scroll'));
+        }
+        win?.dispatchEvent?.(new Event('resize'));
+      }
+    }
+
+    if (typeof action.animStep === 'number') {
+      if (typeof win?.goToAnimStep === 'function') {
+        win.goToAnimStep(action.animStep, false);
+      }
+    }
+
+    if (action.attributes && action.attributes.length > 0) {
+      for (const attr of action.attributes) {
+        const el = doc.querySelector(attr.selector) as HTMLElement;
+        if (el) {
+          if (attr.value === null) el.removeAttribute(attr.name);
+          else el.setAttribute(attr.name, attr.value);
+        }
+      }
+    }
+
+    if (action.inputs && action.inputs.length > 0) {
+      for (const inp of action.inputs) {
+        const el = doc.querySelector(inp.selector) as HTMLInputElement;
+        if (el) {
+          if (inp.value !== undefined) el.value = inp.value;
+          if (inp.checked !== undefined) el.checked = inp.checked;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+    }
+
+    if (action.media && action.media.length > 0) {
+      for (const m of action.media) {
+        const el = doc.querySelector(m.selector) as HTMLMediaElement;
+        if (el) {
+          if (Math.abs(el.currentTime - m.currentTime) > 0.5) el.currentTime = m.currentTime;
+          if (m.paused && !el.paused) el.pause();
+          else if (!m.paused && el.paused) el.play().catch(() => {});
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+function applyInteractionToCurrent(action: SlideInteractionAction): void {
+  try {
+    const doc = currentFrameEl.contentDocument;
+    const win = currentFrameEl.contentWindow as any;
+    if (!doc) return;
+
+    if (action.actionType === 'step' && typeof action.step === 'number') {
+      if (typeof win?.goToAnimStep === 'function') {
+        win.goToAnimStep(action.step, true);
+      }
+      return;
+    }
+
+    if (action.actionType === 'click') {
+      let el: HTMLElement | null = null;
+      if (action.selector) {
+        try {
+          el = doc.querySelector(action.selector) as HTMLElement;
+        } catch (_) {}
+      }
+      if (!el && typeof action.normX === 'number' && typeof action.normY === 'number') {
+        const x = action.normX * (doc.documentElement?.clientWidth || 1920);
+        const y = action.normY * (doc.documentElement?.clientHeight || 1080);
+        el = doc.elementFromPoint(x, y) as HTMLElement;
+      }
+
+      if (el) {
+        (el as any).__isRemoteSync = true;
+        el.click();
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: win }));
+        setTimeout(() => { delete (el as any).__isRemoteSync; }, 100);
+      }
+    }
+  } catch (_) {}
+}
+
+// Incoming sync listeners from main presentation
+window.presenterAPI.onInteraction((action) => {
+  if (currentState && action.slideIndex === currentState.currentIndex) {
+    applyInteractionToCurrent(action);
+  }
+});
+
+window.presenterAPI.onSlideScroll((action) => {
+  if (currentState && action.slideIndex === currentState.currentIndex) {
+    applyScrollToCurrent(action);
+  }
+});
+
+window.presenterAPI.onSlideDomSync((action) => {
+  if (currentState && action.slideIndex === currentState.currentIndex) {
+    applyDomSyncToCurrent(action);
+  }
+});
+
+window.presenterAPI.onSlideFrame((frame) => {
+  if (frame && frame.data) {
+    lastMirroredFrame = frame.data;
+    if (isMirrorEnabled && currentMirrorEl) {
+      currentMirrorEl.src = frame.data;
+      currentMirrorEl.style.display = 'block';
+    }
+    if (liveAudienceSyncBadge) {
+      liveAudienceSyncBadge.style.opacity = '1';
+    }
+  }
+});
+
+window.addEventListener('message', (event) => {
+  if (!event.data) return;
+  if (event.data.type === 'NEODECK_STEP_CHANGED') {
+    window.presenterAPI.sendInteraction({
+      type: 'slide:interaction',
+      slideIndex: currentState?.currentIndex ?? 0,
+      actionType: 'step',
+      step: event.data.currentStep
+    });
   }
 });
