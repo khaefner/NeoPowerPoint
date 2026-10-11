@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 import { DeckService } from './deck-service';
 import { InkStore } from './ink-store';
 import { InkStroke, InkPoint, InkSyncAction, SlideScrollAction, SlideDomSyncAction, SlideFrameAction } from '../types/ink';
+import { logger } from './logger';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -221,7 +222,9 @@ export class SyncServer extends EventEmitter {
         res.writeHead(200, {
           'Content-Type': contentType,
           'Content-Length': fileBuffer.length,
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0',
         });
         res.end(fileBuffer);
         return;
@@ -231,7 +234,9 @@ export class SyncServer extends EventEmitter {
       res.writeHead(200, {
         'Content-Type': contentType,
         'Content-Length': fileBuffer.length,
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
       });
       res.end(fileBuffer);
     } catch (err: any) {
@@ -283,7 +288,7 @@ export class SyncServer extends EventEmitter {
 
   private handleWsConnection(ws: WebSocket): void {
     this.clients.add(ws);
-    console.log(`[SyncServer] New tablet client connected (total: ${this.clients.size})`);
+    logger.info('SyncServer', `New tablet WebSocket client connected (total: ${this.clients.size})`);
     this.emit('client-count-changed', this.clients.size);
 
     // Send current slide state immediately on connection
@@ -326,19 +331,20 @@ export class SyncServer extends EventEmitter {
         const msg = JSON.parse(data.toString()) as InkSyncAction;
         this.processClientMessage(msg, ws);
       } catch (err: any) {
-        console.warn('[SyncServer] WS parse error:', err.message);
+        logger.warn('SyncServer', `WS parse error: ${err.message}`);
       }
     });
 
     ws.on('close', () => {
       this.clients.delete(ws);
-      console.log(`[SyncServer] Client disconnected (total: ${this.clients.size})`);
+      logger.info('SyncServer', `Tablet WebSocket client disconnected (remaining: ${this.clients.size})`);
       this.emit('client-count-changed', this.clients.size);
     });
 
-    ws.on('error', (err) => {
-      console.warn('[SyncServer] WS client error:', err.message);
+    ws.on('error', (err: any) => {
+      logger.warn('SyncServer', `WS client error: ${err.message}`);
       this.clients.delete(ws);
+      this.emit('client-count-changed', this.clients.size);
     });
   }
 
@@ -408,7 +414,15 @@ export class SyncServer extends EventEmitter {
     const raw = JSON.stringify(action);
     for (const client of this.clients) {
       if (client !== senderWs && client.readyState === WebSocket.OPEN) {
-        client.send(raw);
+        // If sending heavy image frame and client buffer is backed up, skip to prevent stalling
+        if (action.type === 'slide:frame' && client.bufferedAmount > 1024 * 1024) {
+          continue;
+        }
+        client.send(raw, (err) => {
+          if (err) {
+            logger.warn('SyncServer', `WS client send error: ${err.message}`);
+          }
+        });
       }
     }
   }
@@ -459,6 +473,7 @@ export class SyncServer extends EventEmitter {
   public broadcastSlideFrame(data: string, slideIndex?: number): void {
     this.latestSlideFrame = data;
     const currentIndex = slideIndex ?? (this.latestState ? (this.latestState.currentIndex ?? 0) : 0);
+    logger.info('SyncServer', `Broadcasting slide:frame to ${this.clients.size} tablets (${data.length} chars, slide: ${currentIndex})`);
     this.broadcast({
       type: 'slide:frame',
       slideIndex: currentIndex,

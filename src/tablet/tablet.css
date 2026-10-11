@@ -132,6 +132,7 @@ html, body {
   pointer-events: none; /* Let pointer events fall through to ink canvas */
   display: block;
   z-index: 1;
+  transition: opacity 0.2s ease;
 }
 
 #slide-mirror {
@@ -144,7 +145,7 @@ html, body {
   pointer-events: none;
   object-fit: contain;
   display: none;
-  z-index: 2;
+  z-index: 5;
   background: transparent;
 }
 

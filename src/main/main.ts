@@ -87,6 +87,7 @@ let captureThrottleTimer: NodeJS.Timeout | null = null;
 let pendingCaptureRequest = false;
 let captureStreamInterval: NodeJS.Timeout | null = null;
 let isFrameSubscriptionActive = false;
+let captureTimeoutTimer: NodeJS.Timeout | null = null;
 
 async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
@@ -97,21 +98,32 @@ async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
   }
 
   isCapturing = true;
+  if (captureTimeoutTimer) clearTimeout(captureTimeoutTimer);
+  captureTimeoutTimer = setTimeout(() => {
+    isCapturing = false;
+  }, 2000);
+
   try {
-    const winBounds = mainWindow.getContentBounds();
+    const winSize = mainWindow.getContentSize();
     let rect: Electron.Rectangle | undefined;
 
-    if (latestSlideRect && latestSlideRect.width > 10 && latestSlideRect.height > 10) {
-      const x = Math.max(0, Math.min(latestSlideRect.x, winBounds.width - 1));
-      const y = Math.max(0, Math.min(latestSlideRect.y, winBounds.height - 1));
-      const w = Math.max(1, Math.min(latestSlideRect.width, winBounds.width - x));
-      const h = Math.max(1, Math.min(latestSlideRect.height, winBounds.height - y));
+    if (latestSlideRect && latestSlideRect.width > 20 && latestSlideRect.height > 20) {
+      const x = Math.max(0, Math.min(Math.round(latestSlideRect.x), Math.max(1, winSize[0] - 20)));
+      const y = Math.max(0, Math.min(Math.round(latestSlideRect.y), Math.max(1, winSize[1] - 20)));
+      const w = Math.max(20, Math.min(Math.round(latestSlideRect.width), winSize[0] - x));
+      const h = Math.max(20, Math.min(Math.round(latestSlideRect.height), winSize[1] - y));
       rect = { x, y, width: w, height: h };
     }
 
     const image = await mainWindow.webContents.capturePage(rect);
     if (!image.isEmpty()) {
-      const buffer = image.toJPEG(75);
+      let finalImage = image;
+      const imgSize = image.getSize();
+      // On macOS Retina (or high-DPI displays), downscale to logical DIPs for fast transmission & e-ink decoding
+      if (rect && imgSize.width > rect.width * 1.25) {
+        finalImage = image.resize({ width: Math.round(rect.width), quality: 'good' });
+      }
+      const buffer = finalImage.toJPEG(65);
       if (buffer.length > 0) {
         if (force || !lastCapturedBuffer || !buffer.equals(lastCapturedBuffer)) {
           lastCapturedBuffer = buffer;
@@ -124,6 +136,10 @@ async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
   } catch (err: any) {
     logger.warn('MainProcess', `capturePage error: ${err.message}`);
   } finally {
+    if (captureTimeoutTimer) {
+      clearTimeout(captureTimeoutTimer);
+      captureTimeoutTimer = null;
+    }
     isCapturing = false;
     if (pendingCaptureRequest) {
       pendingCaptureRequest = false;
@@ -146,6 +162,7 @@ function scheduleSlideCapture(force: boolean = false, delayMs: number = 60): voi
 }
 
 function updateCaptureStreamingState(clientCount: number): void {
+  logger.info('MainProcess', `updateCaptureStreamingState called, clientCount=${clientCount}`);
   if (clientCount > 0) {
     if (!captureStreamInterval) {
       captureStreamInterval = setInterval(() => {
@@ -153,6 +170,7 @@ function updateCaptureStreamingState(clientCount: number): void {
           captureAndBroadcastSlide(false);
         }
       }, 120);
+      logger.info('MainProcess', 'Started background slide capture interval (120ms)');
     }
 
     if (!isFrameSubscriptionActive && mainWindow && !mainWindow.isDestroyed()) {
@@ -161,6 +179,7 @@ function updateCaptureStreamingState(clientCount: number): void {
           scheduleSlideCapture(false, 50);
         });
         isFrameSubscriptionActive = true;
+        logger.info('MainProcess', 'Started webContents.beginFrameSubscription');
       } catch (err: any) {
         logger.warn('MainProcess', `beginFrameSubscription unavailable: ${err.message}`);
       }
@@ -171,12 +190,14 @@ function updateCaptureStreamingState(clientCount: number): void {
     if (captureStreamInterval) {
       clearInterval(captureStreamInterval);
       captureStreamInterval = null;
+      logger.info('MainProcess', 'Stopped background slide capture interval');
     }
     if (isFrameSubscriptionActive && mainWindow && !mainWindow.isDestroyed()) {
       try {
         mainWindow.webContents.endFrameSubscription();
       } catch (_) {}
       isFrameSubscriptionActive = false;
+      logger.info('MainProcess', 'Stopped webContents.beginFrameSubscription');
     }
     lastCapturedBuffer = null;
   }

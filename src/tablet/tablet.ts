@@ -62,6 +62,20 @@ class TabletInkingClient {
 
     this.slideFrame.addEventListener('load', () => this.handleFrameLoad());
 
+    if (this.slideMirror) {
+      this.slideMirror.onload = () => {
+        if (this.slideMirror.style.display === 'block') {
+          this.slideFrame.style.opacity = '0';
+        }
+      };
+      this.slideMirror.onerror = (e) => {
+        if (!this.slideMirror.src || this.slideMirror.src === window.location.href) return;
+        console.warn('[TabletClient] slideMirror frame decode error:', e);
+        this.slideFrame.style.opacity = '1';
+        this.slideMirror.style.display = 'none';
+      };
+    }
+
     this.initLayout();
     this.initToolbar();
     this.initPointerEvents();
@@ -672,10 +686,14 @@ class TabletInkingClient {
         break;
 
       case 'slide:frame':
-        if (action.slideIndex === this.currentSlideIndex || action.slideIndex === undefined) {
-          if (this.slideMirror) {
-            this.slideMirror.src = action.data;
-            this.slideMirror.style.display = 'block';
+        if (this.slideMirror && action.data) {
+          this.slideMirror.src = action.data;
+          this.slideMirror.style.display = 'block';
+          if (this.slideFrame) {
+            this.slideFrame.style.opacity = '0';
+          }
+          if (this.statusTextEl && this.wsConnected) {
+            this.statusTextEl.textContent = 'Mirror Active';
           }
         }
         break;
@@ -706,6 +724,7 @@ class TabletInkingClient {
       if (this.slideFrame.src !== fullUrl) {
         this.isFrameLoading = true;
         this.slideFrame.src = slideUrl;
+        this.slideFrame.style.opacity = '1';
         if (this.slideMirror) {
           this.slideMirror.style.display = 'none';
           this.slideMirror.src = '';

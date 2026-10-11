@@ -299,7 +299,7 @@ class PresentationApp {
 
     // Tablet companion screen mirroring triggers
     const triggerWindowCapture = () => {
-      window.electronAPI.requestSlideCapture(this.getSlideBoxRect());
+      this.updateSlideRect();
     };
     window.addEventListener('wheel', triggerWindowCapture, { passive: true });
     window.addEventListener('pointerup', triggerWindowCapture, { passive: true });
@@ -314,6 +314,12 @@ class PresentationApp {
       width: Math.max(1, Math.round(r.width)),
       height: Math.max(1, Math.round(r.height))
     };
+  }
+
+  private updateSlideRect(): void {
+    const rect = this.getSlideBoxRect();
+    window.electronAPI.updateSlideRect(rect);
+    window.electronAPI.requestSlideCapture(rect);
   }
 
   private setupOverviewScaler(): void {
@@ -370,36 +376,34 @@ class PresentationApp {
     this.slidesListEl.style.setProperty('--slide-aspect-ratio', `${baseW} / ${baseH}`);
   }
 
+  private updateScale(): void {
+    if (!this.manifest) return;
+    const stageW = this.stageEl.clientWidth;
+    const stageH = this.stageEl.clientHeight;
+    if (stageW <= 0 || stageH <= 0) return;
+
+    const baseW = this.manifest.customWidth || 1920;
+    const baseH = this.manifest.customHeight || 1080;
+
+    // In presentation mode (windowed or fullscreen), fill available stage
+    const paddingFactor = this.isPresentationMode ? 1.0 : 0.96;
+    const scale = Math.min((stageW * paddingFactor) / baseW, (stageH * paddingFactor) / baseH);
+
+    this.slideBoxEl.style.width = `${baseW}px`;
+    this.slideBoxEl.style.height = `${baseH}px`;
+    this.slideBoxEl.style.transform = `scale(${scale})`;
+    this.slideBoxEl.style.left = `${(stageW - baseW) / 2}px`;
+    this.slideBoxEl.style.top = `${(stageH - baseH) / 2}px`;
+
+    requestAnimationFrame(() => {
+      this.updateSlideRect();
+    });
+  }
+
   private setupScaler(): void {
-    const updateScale = () => {
-      if (!this.manifest) return;
-      const stageW = this.stageEl.clientWidth;
-      const stageH = this.stageEl.clientHeight;
-      if (stageW <= 0 || stageH <= 0) return;
-
-      const baseW = this.manifest.customWidth || 1920;
-      const baseH = this.manifest.customHeight || 1080;
-
-      // In presentation mode (windowed or fullscreen), fill available stage
-      const paddingFactor = this.isPresentationMode ? 1.0 : 0.96;
-      const scale = Math.min((stageW * paddingFactor) / baseW, (stageH * paddingFactor) / baseH);
-
-      this.slideBoxEl.style.width = `${baseW}px`;
-      this.slideBoxEl.style.height = `${baseH}px`;
-      this.slideBoxEl.style.transform = `scale(${scale})`;
-      this.slideBoxEl.style.left = `${(stageW - baseW) / 2}px`;
-      this.slideBoxEl.style.top = `${(stageH - baseH) / 2}px`;
-
-      requestAnimationFrame(() => {
-        const rect = this.getSlideBoxRect();
-        window.electronAPI.updateSlideRect(rect);
-        window.electronAPI.requestSlideCapture(rect);
-      });
-    };
-
-    const ro = new ResizeObserver(updateScale);
+    const ro = new ResizeObserver(() => this.updateScale());
     ro.observe(this.stageEl);
-    window.addEventListener('resize', updateScale);
+    window.addEventListener('resize', () => this.updateScale());
   }
 
   private setupIPCListeners(): void {
@@ -534,8 +538,8 @@ class PresentationApp {
           slideIndex: this.currentIndex,
           animStep: this.currentAnimStep
         });
-        window.electronAPI.requestSlideCapture(this.getSlideBoxRect());
-        setTimeout(() => window.electronAPI.requestSlideCapture(this.getSlideBoxRect()), 300);
+        this.updateSlideRect();
+        setTimeout(() => this.updateSlideRect(), 300);
       }
     });
   }
@@ -689,7 +693,7 @@ class PresentationApp {
           scrollThrottleTimer = null;
           if (latestScrollAction && this.currentIndex === slideIndex) {
             window.electronAPI.syncSlideScroll(latestScrollAction);
-            window.electronAPI.requestSlideCapture(this.getSlideBoxRect());
+            this.updateSlideRect();
           }
         }, 30);
       }
@@ -846,7 +850,7 @@ class PresentationApp {
 
     // Interaction triggers inside iframe
     const triggerIframeCapture = () => {
-      window.electronAPI.requestSlideCapture(this.getSlideBoxRect());
+      this.updateSlideRect();
     };
     doc.addEventListener('wheel', triggerIframeCapture, { capture: true, passive: true });
     doc.addEventListener('pointerup', triggerIframeCapture, { capture: true, passive: true });
@@ -1140,6 +1144,7 @@ class PresentationApp {
 
     this.inkOverlay?.clear();
 
+    this.updateScale();
     this.renderSidebarSlides();
     this.goToSlide(0);
   }
@@ -1349,8 +1354,8 @@ class PresentationApp {
             this.syncPresenterState();
           }
         }
-        window.electronAPI.requestSlideCapture(this.getSlideBoxRect());
-        setTimeout(() => window.electronAPI.requestSlideCapture(this.getSlideBoxRect()), 300);
+        this.updateSlideRect();
+        setTimeout(() => this.updateSlideRect(), 300);
       };
       window.dispatchEvent(new Event('resize'));
       return;
@@ -1444,8 +1449,8 @@ class PresentationApp {
           this.totalAnimSteps = 0;
           this.syncPresenterState();
         }
-        window.electronAPI.requestSlideCapture(this.getSlideBoxRect());
-        setTimeout(() => window.electronAPI.requestSlideCapture(this.getSlideBoxRect()), 380);
+        this.updateSlideRect();
+        setTimeout(() => this.updateSlideRect(), 380);
       }
 
       // Cleanup idle frame after transition ends
