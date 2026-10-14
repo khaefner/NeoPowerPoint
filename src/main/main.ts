@@ -5,6 +5,21 @@ import { DeckService } from './deck-service';
 import { DeckWatcher } from './watcher';
 import { registerCustomProtocolScheme, setupCustomProtocolHandler } from './protocol';
 import { DeckManifest } from '../types/deck';
+import { AIService } from './ai-service';
+import { AISettings, GenerateSlideRequest } from '../types/ai';
+import { ADBService } from './adb-service';
+import { SyncServer } from './sync-server';
+import { InkStore } from './ink-store';
+import { InkSyncAction, SlideScrollAction, SlideDomSyncAction, SlideInteractionAction } from '../types/ink';
+import { logger } from './logger';
+
+process.on('uncaughtException', (err) => {
+  logger.error('MainProcess', 'Uncaught Exception', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('MainProcess', 'Unhandled Promise Rejection', reason);
+});
 
 // Append no-sandbox if needed in Linux environments
 app.commandLine.appendSwitch('no-sandbox');
@@ -16,6 +31,194 @@ let presenterWindow: BrowserWindow | null = null;
 let latestPresenterState: any = null;
 
 const deckService = new DeckService();
+const aiService = new AIService();
+const inkStore = new InkStore();
+const syncServer = new SyncServer(deckService, inkStore, 8765);
+const adbService = new ADBService(8765);
+
+function broadcastToWindows(channel: string, data: any): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, data);
+  }
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send(channel, data);
+  }
+}
+
+// Wire SyncServer and ADBService events
+adbService.on('devices-changed', (devices) => {
+  broadcastToWindows('adb:devices-changed', devices);
+});
+
+syncServer.on('slide:navigate', (target) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('slide:navigate', target);
+  }
+});
+
+syncServer.on('ink:stroke-start', (stroke) => {
+  broadcastToWindows('ink:action', { type: 'ink:stroke-start', stroke });
+});
+
+syncServer.on('ink:stroke-update', (id, points) => {
+  broadcastToWindows('ink:action', { type: 'ink:stroke-update', id, points });
+});
+
+syncServer.on('ink:stroke-end', (id) => {
+  broadcastToWindows('ink:action', { type: 'ink:stroke-end', id });
+});
+
+syncServer.on('ink:undo', (slideIndex) => {
+  broadcastToWindows('ink:action', { type: 'ink:undo', slideIndex });
+});
+
+syncServer.on('ink:clear', (slideIndex) => {
+  broadcastToWindows('ink:action', { type: 'ink:clear', slideIndex });
+});
+
+syncServer.on('ink:sync-slide', (slideIndex, strokes) => {
+  broadcastToWindows('ink:action', { type: 'ink:sync-slide', slideIndex, strokes });
+});
+
+let latestSlideRect: Electron.Rectangle | null = null;
+let lastCapturedBuffer: Buffer | null = null;
+let isCapturing = false;
+let captureThrottleTimer: NodeJS.Timeout | null = null;
+let pendingCaptureRequest = false;
+let captureStreamInterval: NodeJS.Timeout | null = null;
+let isFrameSubscriptionActive = false;
+let captureTimeoutTimer: NodeJS.Timeout | null = null;
+
+function hasCaptureConsumer(): boolean {
+  return syncServer.getConnectedClientCount() > 0 || (presenterWindow !== null && !presenterWindow.isDestroyed());
+}
+
+async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
+  if (!hasCaptureConsumer()) return;
+  if (isCapturing) {
+    pendingCaptureRequest = true;
+    return;
+  }
+
+  isCapturing = true;
+  if (captureTimeoutTimer) clearTimeout(captureTimeoutTimer);
+  captureTimeoutTimer = setTimeout(() => {
+    isCapturing = false;
+  }, 2000);
+
+  try {
+    const winSize = mainWindow.getContentSize();
+    let rect: Electron.Rectangle | undefined;
+
+    if (latestSlideRect && latestSlideRect.width > 20 && latestSlideRect.height > 20) {
+      const x = Math.max(0, Math.min(Math.round(latestSlideRect.x), Math.max(1, winSize[0] - 20)));
+      const y = Math.max(0, Math.min(Math.round(latestSlideRect.y), Math.max(1, winSize[1] - 20)));
+      const w = Math.max(20, Math.min(Math.round(latestSlideRect.width), winSize[0] - x));
+      const h = Math.max(20, Math.min(Math.round(latestSlideRect.height), winSize[1] - y));
+      rect = { x, y, width: w, height: h };
+    }
+
+    const image = await mainWindow.webContents.capturePage(rect);
+    if (!image.isEmpty()) {
+      let finalImage = image;
+      const imgSize = image.getSize();
+      // On macOS Retina (or high-DPI displays), downscale to logical DIPs for fast transmission & e-ink decoding
+      if (rect && imgSize.width > rect.width * 1.25) {
+        finalImage = image.resize({ width: Math.round(rect.width), quality: 'good' });
+      }
+      const buffer = finalImage.toJPEG(65);
+      if (buffer.length > 0) {
+        if (force || !lastCapturedBuffer || !buffer.equals(lastCapturedBuffer)) {
+          lastCapturedBuffer = buffer;
+          const dataUri = 'data:image/jpeg;base64,' + buffer.toString('base64');
+          const slideIndex = latestPresenterState?.currentIndex ?? 0;
+          syncServer.broadcastSlideFrame(dataUri, slideIndex);
+          if (presenterWindow && !presenterWindow.isDestroyed()) {
+            presenterWindow.webContents.send('slide:frame', {
+              type: 'slide:frame',
+              slideIndex,
+              data: dataUri
+            });
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    logger.warn('MainProcess', `capturePage error: ${err.message}`);
+  } finally {
+    if (captureTimeoutTimer) {
+      clearTimeout(captureTimeoutTimer);
+      captureTimeoutTimer = null;
+    }
+    isCapturing = false;
+    if (pendingCaptureRequest) {
+      pendingCaptureRequest = false;
+      scheduleSlideCapture(false, 30);
+    }
+  }
+}
+
+function scheduleSlideCapture(force: boolean = false, delayMs: number = 60): void {
+  if (!hasCaptureConsumer()) return;
+  if (captureThrottleTimer) {
+    pendingCaptureRequest = true;
+    return;
+  }
+
+  captureThrottleTimer = setTimeout(() => {
+    captureThrottleTimer = null;
+    captureAndBroadcastSlide(force);
+  }, delayMs);
+}
+
+function updateCaptureStreamingState(): void {
+  const active = hasCaptureConsumer();
+  logger.info('MainProcess', `updateCaptureStreamingState: active=${active} (tablets: ${syncServer.getConnectedClientCount()}, presenter: ${!!presenterWindow})`);
+  if (active) {
+    if (!captureStreamInterval) {
+      captureStreamInterval = setInterval(() => {
+        if (hasCaptureConsumer() && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+          captureAndBroadcastSlide(false);
+        }
+      }, 120);
+      logger.info('MainProcess', 'Started background slide capture interval (120ms)');
+    }
+
+    if (!isFrameSubscriptionActive && mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.webContents.beginFrameSubscription(false, () => {
+          scheduleSlideCapture(false, 50);
+        });
+        isFrameSubscriptionActive = true;
+        logger.info('MainProcess', 'Started webContents.beginFrameSubscription');
+      } catch (err: any) {
+        logger.warn('MainProcess', `beginFrameSubscription unavailable: ${err.message}`);
+      }
+    }
+
+    scheduleSlideCapture(true, 50);
+  } else {
+    if (captureStreamInterval) {
+      clearInterval(captureStreamInterval);
+      captureStreamInterval = null;
+      logger.info('MainProcess', 'Stopped background slide capture interval');
+    }
+    if (isFrameSubscriptionActive && mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.webContents.endFrameSubscription();
+      } catch (_) {}
+      isFrameSubscriptionActive = false;
+      logger.info('MainProcess', 'Stopped webContents.beginFrameSubscription');
+    }
+    lastCapturedBuffer = null;
+  }
+}
+
+syncServer.on('client-count-changed', () => {
+  updateCaptureStreamingState();
+});
+
 const deckWatcher = new DeckWatcher((filePath, eventType) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('deck:file-changed', { filePath, eventType });
@@ -23,6 +226,7 @@ const deckWatcher = new DeckWatcher((filePath, eventType) => {
 });
 
 function createMainWindow(): void {
+  logger.info('MainProcess', 'Creating main window');
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -39,14 +243,25 @@ function createMainWindow(): void {
     }
   });
 
-  mainWindow.webContents.on('console-message', (_event, _level, message) => {
-    console.log(`[RENDERER CONSOLE]: ${message}`);
+  mainWindow.webContents.on('console-message', (_event, level, message) => {
+    const levelMap: Record<number, 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'> = {
+      0: 'DEBUG',
+      1: 'INFO',
+      2: 'WARN',
+      3: 'ERROR'
+    };
+    logger.log(levelMap[level] || 'INFO', 'RendererConsole', message);
   });
 
   mainWindow.loadURL('neopres://deck/renderer/index.html');
 
+  mainWindow.webContents.on('did-finish-load', () => {
+    updateCaptureStreamingState();
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
+    updateCaptureStreamingState();
     if (presenterWindow && !presenterWindow.isDestroyed()) {
       presenterWindow.close();
     }
@@ -108,11 +323,23 @@ function openPresenterWindow(): boolean {
   presenterWindow.webContents.on('did-finish-load', () => {
     if (latestPresenterState && presenterWindow && !presenterWindow.isDestroyed()) {
       presenterWindow.webContents.send('presenter:state-update', latestPresenterState);
+      const currentIndex = latestPresenterState.currentIndex || 0;
+      const strokes = inkStore.getStrokes(currentIndex);
+      presenterWindow.webContents.send('ink:action', {
+        type: 'ink:sync-slide',
+        slideIndex: currentIndex,
+        strokes
+      });
     }
+    if (presenterWindow && !presenterWindow.isDestroyed()) {
+      presenterWindow.webContents.send('adb:devices-changed', adbService.getStatus().devices);
+    }
+    updateCaptureStreamingState();
   });
 
   presenterWindow.on('closed', () => {
     presenterWindow = null;
+    updateCaptureStreamingState();
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isFullScreen()) {
         mainWindow.setFullScreen(false);
@@ -178,6 +405,20 @@ function buildAppMenu(): void {
               const res = await handleCreateDeck();
               if (res) mainWindow.webContents.send('deck:loaded', res);
             }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Export Debug Logs...',
+          accelerator: 'CmdOrCtrl+Shift+L',
+          click: async () => {
+            await logger.exportLogs(mainWindow || undefined);
+          }
+        },
+        {
+          label: 'Open Logs Folder',
+          click: async () => {
+            await logger.openLogDir();
           }
         },
         { type: 'separator' },
@@ -260,6 +501,33 @@ function buildAppMenu(): void {
           }
         }
       ]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Keyboard Shortcuts',
+          accelerator: 'CmdOrCtrl+/',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send('menu:help-shortcuts');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Export Debug Logs...',
+          click: async () => {
+            await logger.exportLogs(mainWindow || undefined);
+          }
+        },
+        {
+          label: 'Open Logs Folder',
+          click: async () => {
+            await logger.openLogDir();
+          }
+        },
+        { type: 'separator' },
+        { role: 'toggleDevTools' }
+      ]
     }
   ];
 
@@ -281,6 +549,7 @@ async function handleOpenFolder() {
 
   const folderPath = result.filePaths[0];
   const deckData = await deckService.openFolder(folderPath);
+  inkStore.resetAll();
   deckWatcher.watch(folderPath);
   return deckData;
 }
@@ -302,6 +571,7 @@ async function handleOpenPackage() {
 
   const packagePath = result.filePaths[0];
   const deckData = await deckService.openPackage(packagePath);
+  inkStore.resetAll();
   deckWatcher.watch(deckData.deckPath);
   return deckData;
 }
@@ -348,6 +618,7 @@ async function handleCreateDeck() {
 
   const folderPath = result.filePaths[0];
   const deckData = await deckService.createNewDeck(folderPath, path.basename(folderPath));
+  inkStore.resetAll();
   deckWatcher.watch(folderPath);
   return deckData;
 }
@@ -364,13 +635,28 @@ async function handleImportPptx() {
   });
 
   if (result.canceled || result.filePaths.length === 0) {
+    logger.info('MainProcess', 'PPTX file selection canceled');
     return null;
   }
 
   const pptxPath = result.filePaths[0];
-  const deckData = await deckService.importPptx(pptxPath);
-  deckWatcher.watch(deckData.deckPath);
-  return deckData;
+  logger.info('MainProcess', `Importing PowerPoint file: ${pptxPath}`);
+  try {
+    const deckData = await deckService.importPptx(pptxPath);
+    inkStore.resetAll();
+    deckWatcher.watch(deckData.deckPath);
+    logger.info('MainProcess', `Successfully imported PPTX into: ${deckData.deckPath}`);
+    return deckData;
+  } catch (err: any) {
+    logger.error('MainProcess', `Failed to import PowerPoint file: ${pptxPath}`, err);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('deck:import-error', {
+        error: err.message,
+        details: err.stack || String(err)
+      });
+    }
+    throw err;
+  }
 }
 
 // IPC Handlers
@@ -379,11 +665,18 @@ ipcMain.handle('dialog:open-package', async () => handleOpenPackage());
 ipcMain.handle('dialog:import-pptx', async () => handleImportPptx());
 ipcMain.handle('dialog:export-package', async () => handleExportPackage());
 ipcMain.handle('dialog:create-deck', async () => handleCreateDeck());
+ipcMain.handle('dialog:export-logs', async () => logger.exportLogs(mainWindow || undefined));
+ipcMain.handle('dialog:open-logs-folder', async () => logger.openLogDir());
+ipcMain.handle('logger:get-logs', async () => logger.generateDiagnosticReport());
+ipcMain.handle('logger:log', async (_event, level: any, message: string, details?: any) => {
+  logger.log(level || 'INFO', 'Renderer', message, details);
+});
 
 ipcMain.handle('deck:load-sample', async () => {
   const sampleDir = path.join(__dirname, '../../sample-deck');
   if (fs.existsSync(sampleDir)) {
     const deckData = await deckService.openFolder(sampleDir);
+    inkStore.resetAll();
     deckWatcher.watch(sampleDir);
     return deckData;
   }
@@ -422,10 +715,54 @@ ipcMain.handle('deck:get-manifest', async () => {
   return deckService.getActiveManifest();
 });
 
-ipcMain.handle('deck:add-slide', async (_, title: string) => {
+ipcMain.handle('deck:add-slide', async (_, title: string, insertAfterIndex?: number) => {
   const activePath = deckService.getActiveDeckPath();
   if (!activePath) return null;
-  return deckService.addNewSlide(activePath, title);
+  return deckService.addNewSlide(activePath, title, insertAfterIndex);
+});
+
+ipcMain.handle('deck:add-web-slide', async (_, title: string, url: string, insertAfterIndex?: number) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.addWebSlide(activePath, title, url, insertAfterIndex);
+});
+
+ipcMain.handle('deck:add-custom-slide', async (_, title: string, htmlContent: string, insertAfterIndex?: number) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.addCustomSlide(activePath, title, htmlContent, insertAfterIndex);
+});
+
+ipcMain.handle('deck:duplicate-slide', async (_, slideIndex: number) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.duplicateSlide(activePath, slideIndex);
+});
+
+ipcMain.handle('deck:delete-slide', async (_, slideIndex: number) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.deleteSlide(activePath, slideIndex);
+});
+
+// AI Designer Endpoints
+ipcMain.handle('ai:get-settings', async () => {
+  return aiService.getSettings();
+});
+
+ipcMain.handle('ai:save-settings', async (_, settings: AISettings) => {
+  return aiService.saveSettings(settings);
+});
+
+ipcMain.handle('ai:generate-slide', async (_, req: GenerateSlideRequest) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) {
+    return { success: false, error: 'No presentation currently open' };
+  }
+  return aiService.generateSlide({
+    ...req,
+    deckPath: activePath
+  });
 });
 
 ipcMain.handle('window:toggle-fullscreen', async () => {
@@ -453,10 +790,86 @@ ipcMain.handle('presenter:close', async () => {
 });
 
 ipcMain.on('presenter:sync-state', (_, state) => {
+  const oldIndex = latestPresenterState?.currentIndex;
   latestPresenterState = state;
   if (presenterWindow && !presenterWindow.isDestroyed()) {
     presenterWindow.webContents.send('presenter:state-update', state);
   }
+  syncServer.updateSlideState(state);
+  if (oldIndex !== state?.currentIndex) {
+    lastCapturedBuffer = null;
+    scheduleSlideCapture(true, 150);
+    setTimeout(() => scheduleSlideCapture(true, 400), 400);
+  } else {
+    scheduleSlideCapture(false, 50);
+  }
+});
+
+ipcMain.on('slide:update-rect', (_, rect) => {
+  latestSlideRect = rect;
+});
+
+ipcMain.on('slide:request-capture', (_, rect) => {
+  if (rect) {
+    latestSlideRect = rect;
+  }
+  scheduleSlideCapture(false, 30);
+});
+
+ipcMain.on('ink:host-action', (event, action: InkSyncAction) => {
+  syncServer.broadcastHostInkAction(action);
+  // Relay action to the opposite window
+  if (mainWindow && event.sender === mainWindow.webContents) {
+    if (presenterWindow && !presenterWindow.isDestroyed()) {
+      presenterWindow.webContents.send('ink:action', action);
+    }
+  } else if (presenterWindow && event.sender === presenterWindow.webContents) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('ink:action', action);
+    }
+  }
+});
+
+ipcMain.on('slide:interaction', (event, action: SlideInteractionAction) => {
+  if (mainWindow && event.sender !== mainWindow.webContents && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('slide:interaction', action);
+  }
+  if (presenterWindow && event.sender !== presenterWindow.webContents && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('slide:interaction', action);
+  }
+});
+
+ipcMain.on('slide:sync-scroll', (event, action: SlideScrollAction) => {
+  syncServer.broadcastSlideScroll(action);
+  if (mainWindow && event.sender !== mainWindow.webContents && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('slide:scroll', action);
+  }
+  if (presenterWindow && event.sender !== presenterWindow.webContents && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('slide:scroll', action);
+  }
+});
+
+ipcMain.on('slide:sync-dom', (event, action: SlideDomSyncAction) => {
+  syncServer.broadcastSlideDom(action);
+  if (mainWindow && event.sender !== mainWindow.webContents && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('slide:dom-sync', action);
+  }
+  if (presenterWindow && event.sender !== presenterWindow.webContents && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('slide:dom-sync', action);
+  }
+});
+
+// ADB IPC Handlers
+ipcMain.handle('adb:get-status', async () => {
+  return adbService.getStatus();
+});
+
+ipcMain.handle('adb:setup-reverse', async (_, deviceId?: string) => {
+  return adbService.setupReverse(deviceId);
+});
+
+ipcMain.handle('adb:launch-tablet', async (_, deviceId?: string) => {
+  return adbService.launchTabletBrowser(deviceId);
 });
 
 ipcMain.on('presenter:navigate', (_, index: number) => {
@@ -478,8 +891,18 @@ ipcMain.on('presenter:prev', () => {
 });
 
 // App Lifecycle
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   setupCustomProtocolHandler(deckService);
+  try {
+    const port = await syncServer.start();
+    if (typeof port === 'number') {
+      adbService.setPort(port);
+    }
+    adbService.startMonitoring(3000);
+    logger.info('MainProcess', `SyncServer started on port ${port}, ADB monitoring active`);
+  } catch (err: any) {
+    logger.error('MainProcess', 'Error starting sync server or ADB service', err);
+  }
   createMainWindow();
 
   app.on('activate', () => {
@@ -490,6 +913,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  adbService.stopMonitoring();
+  syncServer.stop();
   if (process.platform !== 'darwin') {
     app.quit();
   }

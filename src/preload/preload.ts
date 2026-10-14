@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { DeckManifest } from '../types/deck';
+import { AISettings, GenerateSlideRequest, GenerateSlideResponse } from '../types/ai';
+import { SlideScrollAction, SlideDomSyncAction, SlideInteractionAction } from '../types/ink';
 
 export interface ElectronAPI {
   openFolderDialog: () => Promise<{ deckPath: string; manifest: DeckManifest } | null>;
@@ -11,12 +13,27 @@ export interface ElectronAPI {
   saveManifest: (manifest: DeckManifest) => Promise<boolean>;
   saveSlideHtml: (slideRelPath: string, htmlContent: string) => Promise<boolean>;
   getManifest: () => Promise<DeckManifest | null>;
-  addNewSlide: (title: string) => Promise<DeckManifest | null>;
+  addNewSlide: (title: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
+  addWebSlide: (title: string, url: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
+  addCustomSlide: (title: string, htmlContent: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
+  duplicateSlide: (slideIndex: number) => Promise<DeckManifest | null>;
+  deleteSlide: (slideIndex: number) => Promise<DeckManifest | null>;
+  aiGetSettings: () => Promise<AISettings>;
+  aiSaveSettings: (settings: AISettings) => Promise<boolean>;
+  aiGenerateSlide: (req: GenerateSlideRequest) => Promise<GenerateSlideResponse>;
   toggleFullscreen: () => Promise<boolean>;
   setWindowedPresentation: (enabled: boolean) => Promise<void>;
   openPresenterWindow: () => Promise<boolean>;
   closePresenterWindow: () => Promise<void>;
   syncStateToPresenter: (state: any) => void;
+  requestSlideCapture: (rect?: { x: number; y: number; width: number; height: number }) => void;
+  updateSlideRect: (rect: { x: number; y: number; width: number; height: number }) => void;
+  syncSlideScroll: (action: SlideScrollAction) => void;
+  syncSlideDom: (action: SlideDomSyncAction) => void;
+  sendInteraction: (action: SlideInteractionAction) => void;
+  onInteraction: (callback: (action: SlideInteractionAction) => void) => () => void;
+  onSlideScroll: (callback: (action: SlideScrollAction) => void) => () => void;
+  onSlideDomSync: (callback: (action: SlideDomSyncAction) => void) => () => void;
   onFileChanged: (callback: (data: { filePath: string; eventType: string }) => void) => () => void;
   onNavigateSlide: (callback: (index: number) => void) => () => void;
   onDeckLoadedEvent: (callback: (data: { deckPath: string; manifest: DeckManifest }) => void) => () => void;
@@ -25,6 +42,16 @@ export interface ElectronAPI {
   onOpenPresenterEvent: (callback: () => void) => () => void;
   onReloadSlideEvent: (callback: () => void) => () => void;
   onSetPresentationModeEvent: (callback: (enabled: boolean) => void) => () => void;
+  onInkAction: (callback: (action: any) => void) => () => void;
+  sendInkAction: (action: any) => void;
+  getAdbStatus: () => Promise<any>;
+  launchTabletBrowser: () => Promise<{ success: boolean; error?: string }>;
+  onAdbDevicesChanged: (callback: (devices: any[]) => void) => () => void;
+  exportLogs: () => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  openLogsFolder: () => Promise<boolean>;
+  getLogs: () => Promise<string>;
+  logMessage: (level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR', message: string, details?: any) => Promise<void>;
+  onDeckImportError: (callback: (data: { error: string; details?: string }) => void) => () => void;
 }
 
 const api: ElectronAPI = {
@@ -37,12 +64,39 @@ const api: ElectronAPI = {
   saveManifest: (manifest) => ipcRenderer.invoke('deck:save-manifest', manifest),
   saveSlideHtml: (slideRelPath, htmlContent) => ipcRenderer.invoke('deck:save-slide-html', slideRelPath, htmlContent),
   getManifest: () => ipcRenderer.invoke('deck:get-manifest'),
-  addNewSlide: (title) => ipcRenderer.invoke('deck:add-slide', title),
+  addNewSlide: (title, insertAfterIndex) => ipcRenderer.invoke('deck:add-slide', title, insertAfterIndex),
+  addWebSlide: (title, url, insertAfterIndex) => ipcRenderer.invoke('deck:add-web-slide', title, url, insertAfterIndex),
+  addCustomSlide: (title, htmlContent, insertAfterIndex) => ipcRenderer.invoke('deck:add-custom-slide', title, htmlContent, insertAfterIndex),
+  duplicateSlide: (slideIndex) => ipcRenderer.invoke('deck:duplicate-slide', slideIndex),
+  deleteSlide: (slideIndex) => ipcRenderer.invoke('deck:delete-slide', slideIndex),
+  aiGetSettings: () => ipcRenderer.invoke('ai:get-settings'),
+  aiSaveSettings: (settings) => ipcRenderer.invoke('ai:save-settings', settings),
+  aiGenerateSlide: (req) => ipcRenderer.invoke('ai:generate-slide', req),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen'),
   setWindowedPresentation: (enabled) => ipcRenderer.invoke('window:set-windowed', enabled),
   openPresenterWindow: () => ipcRenderer.invoke('presenter:open'),
   closePresenterWindow: () => ipcRenderer.invoke('presenter:close'),
   syncStateToPresenter: (state) => ipcRenderer.send('presenter:sync-state', state),
+  requestSlideCapture: (rect) => ipcRenderer.send('slide:request-capture', rect),
+  updateSlideRect: (rect) => ipcRenderer.send('slide:update-rect', rect),
+  syncSlideScroll: (action) => ipcRenderer.send('slide:sync-scroll', action),
+  syncSlideDom: (action) => ipcRenderer.send('slide:sync-dom', action),
+  sendInteraction: (action) => ipcRenderer.send('slide:interaction', action),
+  onInteraction: (callback) => {
+    const handler = (_: any, action: any) => callback(action);
+    ipcRenderer.on('slide:interaction', handler);
+    return () => ipcRenderer.removeListener('slide:interaction', handler);
+  },
+  onSlideScroll: (callback) => {
+    const handler = (_: any, action: any) => callback(action);
+    ipcRenderer.on('slide:scroll', handler);
+    return () => ipcRenderer.removeListener('slide:scroll', handler);
+  },
+  onSlideDomSync: (callback) => {
+    const handler = (_: any, action: any) => callback(action);
+    ipcRenderer.on('slide:dom-sync', handler);
+    return () => ipcRenderer.removeListener('slide:dom-sync', handler);
+  },
 
   onFileChanged: (callback) => {
     const handler = (_: any, data: any) => callback(data);
@@ -90,7 +144,30 @@ const api: ElectronAPI = {
     const handler = (_: any, enabled: boolean) => callback(enabled);
     ipcRenderer.on('deck:set-presentation-mode', handler);
     return () => ipcRenderer.removeListener('deck:set-presentation-mode', handler);
-  }
+  },
+
+  onInkAction: (callback) => {
+    const handler = (_: any, action: any) => callback(action);
+    ipcRenderer.on('ink:action', handler);
+    return () => ipcRenderer.removeListener('ink:action', handler);
+  },
+  sendInkAction: (action) => ipcRenderer.send('ink:host-action', action),
+  getAdbStatus: () => ipcRenderer.invoke('adb:get-status'),
+  launchTabletBrowser: () => ipcRenderer.invoke('adb:launch-tablet'),
+  onAdbDevicesChanged: (callback) => {
+    const handler = (_: any, devices: any[]) => callback(devices);
+    ipcRenderer.on('adb:devices-changed', handler);
+    return () => ipcRenderer.removeListener('adb:devices-changed', handler);
+  },
+  exportLogs: () => ipcRenderer.invoke('dialog:export-logs'),
+  openLogsFolder: () => ipcRenderer.invoke('dialog:open-logs-folder'),
+  getLogs: () => ipcRenderer.invoke('logger:get-logs'),
+  logMessage: (level, message, details) => ipcRenderer.invoke('logger:log', level, message, details),
+  onDeckImportError: (callback) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('deck:import-error', handler);
+    return () => ipcRenderer.removeListener('deck:import-error', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

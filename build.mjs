@@ -21,6 +21,7 @@ async function copyDir(src, dest) {
 async function copyStaticAssets() {
   await fs.promises.mkdir('dist/renderer', { recursive: true });
   await fs.promises.mkdir('dist/presenter', { recursive: true });
+  await fs.promises.mkdir('dist/tablet', { recursive: true });
 
   if (fs.existsSync('src/renderer/index.html')) {
     await fs.promises.copyFile('src/renderer/index.html', 'dist/renderer/index.html');
@@ -33,6 +34,15 @@ async function copyStaticAssets() {
   }
   if (fs.existsSync('src/presenter/presenter.css')) {
     await fs.promises.copyFile('src/presenter/presenter.css', 'dist/presenter/presenter.css');
+  }
+  if (fs.existsSync('src/tablet/index.html')) {
+    await fs.promises.copyFile('src/tablet/index.html', 'dist/tablet/index.html');
+  }
+  if (fs.existsSync('src/tablet/tablet.css')) {
+    await fs.promises.copyFile('src/tablet/tablet.css', 'dist/tablet/tablet.css');
+  }
+  if (fs.existsSync('src/tablet/manifest.json')) {
+    await fs.promises.copyFile('src/tablet/manifest.json', 'dist/tablet/manifest.json');
   }
   if (fs.existsSync('src/converter')) {
     await copyDir('src/converter', 'dist/converter');
@@ -50,7 +60,7 @@ async function build() {
     target: 'node20',
     format: 'cjs',
     outfile: 'dist/main/main.js',
-    external: ['electron', 'adm-zip', 'chokidar'],
+    external: ['electron', 'adm-zip', 'chokidar', 'ws'],
     sourcemap: true,
   });
 
@@ -88,6 +98,17 @@ async function build() {
     target: 'chrome120',
     format: 'esm',
     outfile: 'dist/presenter/presenter.js',
+    sourcemap: true,
+  });
+
+  // 5. Tablet script
+  await esbuild.build({
+    entryPoints: ['src/tablet/tablet.ts'],
+    bundle: true,
+    platform: 'browser',
+    target: 'chrome120',
+    format: 'esm',
+    outfile: 'dist/tablet/tablet.js',
     sourcemap: true,
   });
 

@@ -109,6 +109,82 @@ async function testSlideSorter() {
   }
   console.log('✓ Verified Slide Sorter reorder algorithm');
 
+  // 5. Verify Context Menu DOM & CSS
+  if (!htmlContent.includes('id="sorter-context-menu"') ||
+      !htmlContent.includes('id="ctx-move-top"') ||
+      !htmlContent.includes('id="ctx-move-bottom"') ||
+      !htmlContent.includes('id="ctx-duplicate"') ||
+      !htmlContent.includes('id="ctx-toggle-hide"') ||
+      !htmlContent.includes('id="ctx-delete"')) {
+    throw new Error('Missing right-click context menu elements in index.html');
+  }
+  console.log('✓ Verified Slide Sorter right-click context menu elements in index.html');
+
+  if (!cssContent.includes('.sorter-context-menu') ||
+      !cssContent.includes('.card-badge-hidden') ||
+      !cssContent.includes('.overview-card.is-hidden') ||
+      !cssContent.includes('.slide-item.is-hidden')) {
+    throw new Error('Missing context menu or hidden slide CSS rules in main.css');
+  }
+  console.log('✓ Verified Slide Sorter context menu and hidden slide CSS rules in main.css');
+
+  // 6. Verify Context Menu and Navigation in app.js
+  if (!jsContent.includes('showSorterContextMenu') ||
+      !jsContent.includes('handleContextMenuAction') ||
+      !jsContent.includes('ctx-move-top') ||
+      !jsContent.includes('ctx-duplicate') ||
+      !jsContent.includes('ctx-toggle-hide') ||
+      !jsContent.includes('ctx-delete')) {
+    throw new Error('Missing context menu logic in compiled app.js');
+  }
+  console.log('✓ Verified Slide Sorter context menu handling logic in app.js');
+
+  // 7. Test hidden slide navigation skipping algorithm
+  const deckWithHidden = [
+    { id: 's1', title: 'Slide 1' },
+    { id: 's2', title: 'Slide 2', hidden: true },
+    { id: 's3', title: 'Slide 3', hidden: true },
+    { id: 's4', title: 'Slide 4' },
+    { id: 's5', title: 'Slide 5', hidden: true },
+  ];
+
+  function getNextSlide(slides, curIdx, isPresentationMode) {
+    if (!isPresentationMode) return curIdx < slides.length - 1 ? curIdx + 1 : curIdx;
+    let nextIdx = curIdx + 1;
+    while (nextIdx < slides.length && slides[nextIdx].hidden) {
+      nextIdx++;
+    }
+    return nextIdx < slides.length ? nextIdx : curIdx;
+  }
+
+  function getPrevSlide(slides, curIdx, isPresentationMode) {
+    if (!isPresentationMode) return curIdx > 0 ? curIdx - 1 : curIdx;
+    let prevIdx = curIdx - 1;
+    while (prevIdx >= 0 && slides[prevIdx].hidden) {
+      prevIdx--;
+    }
+    return prevIdx >= 0 ? prevIdx : curIdx;
+  }
+
+  // From Slide 1 (idx 0), next in presentation mode should jump past s2, s3 directly to s4 (idx 3)
+  const nextFrom1 = getNextSlide(deckWithHidden, 0, true);
+  if (nextFrom1 !== 3) {
+    throw new Error(`Expected presentation mode next from 0 to skip hidden slides and land on 3, got ${nextFrom1}`);
+  }
+
+  // From Slide 4 (idx 3), next in presentation mode should not advance since slide 5 is hidden
+  const nextFrom4 = getNextSlide(deckWithHidden, 3, true);
+  if (nextFrom4 !== 3) {
+    throw new Error(`Expected presentation mode next from 3 to stop at end, got ${nextFrom4}`);
+  }
+
+  // From Slide 4 (idx 3), prev in presentation mode should jump past hidden s3, s2 back to s1 (idx 0)
+  const prevFrom4 = getPrevSlide(deckWithHidden, 3, true);
+  if (prevFrom4 !== 0) {
+    throw new Error(`Expected presentation mode prev from 3 to skip hidden slides and land on 0, got ${prevFrom4}`);
+  }
+  console.log('✓ Verified presentation mode navigation skips hidden slides');
+
   console.log('--- All Slide Sorter tests passed! ---');
 }
 

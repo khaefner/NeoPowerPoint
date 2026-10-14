@@ -1176,6 +1176,114 @@ kbd {
   border: 1px solid rgba(56, 189, 248, 0.4);
 }
 
+.card-badge-hidden {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+  border-radius: 4px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.overview-card.is-hidden {
+  opacity: 0.55;
+  filter: grayscale(40%);
+  border-style: dashed;
+}
+.overview-card.is-hidden:hover {
+  opacity: 0.85;
+  filter: grayscale(0%);
+}
+
+.slide-item.is-hidden {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.slide-item.is-hidden:hover {
+  opacity: 0.85;
+}
+
+.slide-item-hidden-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border-radius: 3px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  margin-left: auto;
+}
+
+/* Slide Sorter Right-Click Context Menu */
+.sorter-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  min-width: 180px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: ctxFadeIn 0.12s ease-out;
+}
+
+@keyframes ctxFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: #e2e8f0;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+.ctx-item:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+}
+.ctx-item svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.ctx-item:hover svg {
+  opacity: 1;
+}
+
+.ctx-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 0;
+}
+
+.ctx-item.ctx-danger {
+  color: #f87171;
+}
+.ctx-item.ctx-danger:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
 /* Dropdown Menu */
 .dropdown {
   position: relative;
@@ -1220,3 +1328,100 @@ kbd {
 .hidden {
   display: none !important;
 }
+
+/* Toast Floating Notification */
+.toast-notification {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-md);
+  padding: 12px 20px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  z-index: 1000;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  max-width: 480px;
+  word-break: break-word;
+}
+
+@keyframes pulse-fill {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
+}
+
+.import-progress-fill {
+  animation: pulse-fill 1.8s infinite ease-in-out;
+}
+
+/* ADB Tablet Status Pill */
+.adb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+}
+
+.adb-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+  flex-shrink: 0;
+}
+
+.adb-dot.connected {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+.adb-dot.unauthorized {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+}
+
+.adb-dot.not-installed {
+  background: #94a3b8;
+}
+
+.adb-dot.disconnected {
+  background: #ef4444;
+}
+
+.adb-label {
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.adb-launch-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.adb-launch-btn:hover:not(:disabled) {
+  background: var(--accent-primary);
+  color: #fff;
+}
+
+.adb-launch-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+

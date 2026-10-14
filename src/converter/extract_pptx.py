@@ -76,6 +76,50 @@ class Pkg:
         return out
 
 
+def extract_metafile_image(data):
+    """Extract embedded vector or raster image (PDF via mutool, PNG, or JPEG) from an EMF/WMF binary."""
+    # 1. Check for embedded PDF (common in Mac PowerPoint exports, e.g. fig42_table.pdf)
+    pdf_start = data.find(b'%PDF')
+    if pdf_start != -1:
+        pdf_end = data.rfind(b'%%EOF')
+        if pdf_end != -1 and pdf_end > pdf_start:
+            pdf_bytes = data[pdf_start:pdf_end + 5]
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tf:
+                tf.write(pdf_bytes)
+                tf_path = tf.name
+            out_png = tf_path + '.png'
+            try:
+                subprocess.run(['mutool', 'draw', '-r', '300', '-o', out_png, tf_path],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                if os.path.exists(out_png):
+                    with open(out_png, 'rb') as f:
+                        png_bytes = f.read()
+                    os.unlink(out_png)
+                    os.unlink(tf_path)
+                    return png_bytes, '.png'
+            except Exception:
+                pass
+            if os.path.exists(tf_path):
+                os.unlink(tf_path)
+
+    # 2. Check for embedded PNG
+    png_start = data.find(b'\x89PNG\r\n\x1a\n')
+    if png_start != -1:
+        png_end = data.find(b'IEND', png_start)
+        if png_end != -1 and png_end > png_start:
+            return data[png_start:png_end + 8], '.png'
+
+    # 3. Check for embedded JPEG
+    jpg_start = data.find(b'\xff\xd8\xff')
+    if jpg_start != -1:
+        jpg_end = data.rfind(b'\xff\xd9')
+        if jpg_end != -1 and jpg_end > jpg_start:
+            return data[jpg_start:jpg_end + 2], '.jpg'
+
+    return None, None
+
+
 class Ctx:
     def __init__(self, pkg, canvas_w, out_dir):
         self.pkg = pkg
@@ -147,13 +191,22 @@ class Ctx:
             return self.media[zip_path]
         name = posixpath.basename(zip_path)
         base, ext = os.path.splitext(name)
-        final, i = name, 1
+        raw_data = self.pkg.z.read(zip_path)
+
+        # If EMF/WMF, check for embedded JPEG or PNG to ensure browser compatibility
+        if ext.lower() in ('.emf', '.wmf'):
+            extracted_img, new_ext = extract_metafile_image(raw_data)
+            if extracted_img and new_ext:
+                raw_data = extracted_img
+                ext = new_ext
+
+        final, i = '%s%s' % (base, ext), 1
         while final in self.media.values():
             final = '%s_%d%s' % (base, i, ext)
             i += 1
         os.makedirs(os.path.join(self.out_dir, 'media'), exist_ok=True)
         with open(os.path.join(self.out_dir, 'media', final), 'wb') as f:
-            f.write(self.pkg.z.read(zip_path))
+            f.write(raw_data)
         self.media[zip_path] = final
         return final
 
@@ -207,7 +260,14 @@ class Ctx:
         if not col:
             return None
         d = ln.find('a:prstDash', NS)
-        return {'color': col, 'width_px': self.px(int(ln.get('w', '12700'))), 'dash': d.get('val') if d is not None else 'solid'}
+        ret = {'color': col, 'width_px': self.px(int(ln.get('w', '12700'))), 'dash': d.get('val') if d is not None else 'solid'}
+        head = ln.find('a:headEnd', NS)
+        tail = ln.find('a:tailEnd', NS)
+        if head is not None and head.get('type') and head.get('type') != 'none':
+            ret['head'] = head.get('type')
+        if tail is not None and tail.get('type') and tail.get('type') != 'none':
+            ret['tail'] = tail.get('type')
+        return ret
 
 
 # ---------------------------------------------------------------- text ----
@@ -240,6 +300,30 @@ def rpr_props(ctx, el):
     return o
 
 
+# Common PPT / Wingdings bullet symbol translation to standard Unicode
+WINGDINGS_BULLET_MAP = {
+    0x20: ' ',
+    0x71: '❑',  # 113 square shadow
+    0x72: '❒',  # 114
+    0x75: '⬩',  # 117 small diamond
+    0x76: '❖',  # 118 black florette / diamond
+    0x77: '◆',  # 119 black diamond
+    0x78: '✦',  # 120 star
+    0xa7: '▪',  # 167 square bullet (PowerPoint default square bullet!)
+    0xa8: '▫',  # 168 hollow square bullet
+    0xa9: '✦',  # 169
+    0xaa: '★',  # 170
+    0xab: '✶',  # 171
+    0xb2: '✦',  # 178
+    0xd8: '➢',  # 216 3D arrow
+    0xdc: '➔',  # 220 arrow
+    0xe0: '→',  # 224 arrow
+    0xfc: '✓',  # 252 checkmark
+    0xfd: '🗹',  # 253 ballot check
+    0xfe: '☒',  # 254 ballot x
+}
+
+
 def ppr_props(ctx, el, rels=None):
     if el is None:
         return {}
@@ -259,7 +343,18 @@ def ppr_props(ctx, el, rels=None):
     if el.find('a:buNone', NS) is not None:
         o['bullet'] = None
     elif el.find('a:buChar', NS) is not None:
-        o['bullet'] = el.find('a:buChar', NS).get('char')
+        ch = el.find('a:buChar', NS).get('char', '')
+        bu_font_el = el.find('a:buFont', NS)
+        bu_font = bu_font_el.get('typeface', '') if bu_font_el is not None else ''
+        if 'wingdings' in bu_font.lower() and ch:
+            code = ord(ch)
+            o['bullet'] = WINGDINGS_BULLET_MAP.get(code, WINGDINGS_BULLET_MAP.get(code & 0xFF, ch))
+        else:
+            # If ch is '§' (0xA7) which is the raw cp1252 byte for square bullet even if buFont inherited:
+            if ch == '§':
+                o['bullet'] = '▪'
+            else:
+                o['bullet'] = ch
     elif el.find('a:buAutoNum', NS) is not None:
         o['bullet'] = 'auto:' + el.find('a:buAutoNum', NS).get('type', 'arabicPeriod')
     bc = ctx.color_of(el.find('a:buClr', NS))
@@ -394,7 +489,8 @@ def parse_shape(ctx, sp, rels, chain, tf, source, master_txstyles):
     nvpr, cnv = nv_pr(sp)
     ph = ph_of(sp)
     name = cnv.get('name') if cnv is not None else ''
-    out = {'name': name, 'kind': kind}
+    sp_id = cnv.get('id') if cnv is not None else None
+    out = {'id': sp_id, 'spid': sp_id, 'name': name, 'kind': kind}
     if cnv is not None and cnv.get('descr'):
         out['alt_text'] = cnv.get('descr')
     if ph:
@@ -423,11 +519,42 @@ def parse_shape(ctx, sp, rels, chain, tf, source, master_txstyles):
     sppr = sp.find('p:spPr', NS)
     if kind == 'sp':
         geom = sppr.find('a:prstGeom', NS) if sppr is not None else None
-        out['geometry'] = geom.get('prst') if geom is not None else ('custom' if sppr is not None and sppr.find('a:custGeom', NS) is not None else 'rect')
+        cust = sppr.find('a:custGeom', NS) if sppr is not None else None
+        out['geometry'] = geom.get('prst') if geom is not None else ('custom' if cust is not None else 'rect')
         if geom is not None:
             adj = {g.get('name'): g.get('fmla') for g in geom.findall('a:avLst/a:gd', NS)}
             if adj:
                 out['geometry_adjust'] = adj
+        if cust is not None:
+            paths = []
+            for p_elem in cust.findall('a:pathLst/a:path', NS):
+                path_w = float(p_elem.get('w', '0'))
+                path_h = float(p_elem.get('h', '0'))
+                d_cmds = []
+                for child in p_elem:
+                    ctag = local(child)
+                    if ctag == 'moveTo':
+                        pt = child.find('a:pt', NS)
+                        if pt is not None:
+                            d_cmds.append(f"M {pt.get('x', '0')} {pt.get('y', '0')}")
+                    elif ctag == 'lnTo':
+                        pt = child.find('a:pt', NS)
+                        if pt is not None:
+                            d_cmds.append(f"L {pt.get('x', '0')} {pt.get('y', '0')}")
+                    elif ctag == 'cubicBezTo':
+                        pts = child.findall('a:pt', NS)
+                        if len(pts) == 3:
+                            d_cmds.append(f"C {pts[0].get('x', '0')} {pts[0].get('y', '0')}, {pts[1].get('x', '0')} {pts[1].get('y', '0')}, {pts[2].get('x', '0')} {pts[2].get('y', '0')}")
+                    elif ctag == 'quadBezTo':
+                        pts = child.findall('a:pt', NS)
+                        if len(pts) == 2:
+                            d_cmds.append(f"Q {pts[0].get('x', '0')} {pts[0].get('y', '0')}, {pts[1].get('x', '0')} {pts[1].get('y', '0')}")
+                    elif ctag == 'close':
+                        d_cmds.append("Z")
+                if d_cmds:
+                    paths.append({'w': path_w, 'h': path_h, 'd': ' '.join(d_cmds)})
+            if paths:
+                out['paths'] = paths
         fill = ctx.fill_of(sppr, rels)
         if fill is None and chain:
             for anc in reversed(chain):
@@ -558,7 +685,9 @@ def parse_chart(ctx, part):
     return out
 
 
-def walk_tree(ctx, tree, rels, layout_root, master_root, tf, source, master_txstyles, out):
+def walk_tree(ctx, tree, rels, layout_root, master_root, tf, source, master_txstyles, out, group_ids=None):
+    if tree is None:
+        return
     for sp in tree:
         n = local(sp)
         if n in ('sp', 'pic', 'graphicFrame', 'cxnSp'):
@@ -568,8 +697,15 @@ def walk_tree(ctx, tree, rels, layout_root, master_root, tf, source, master_txst
                 chain = [find_ph(master_root, ph), find_ph(layout_root, ph)]
             res = parse_shape(ctx, sp, rels, chain, tf, source, master_txstyles)
             if res:
+                if group_ids:
+                    res['group_ids'] = list(group_ids)
                 out.append(res)
         elif n == 'grpSp':
+            _, cnv = nv_pr(sp)
+            grp_id = cnv.get('id') if cnv is not None else None
+            new_groups = list(group_ids or [])
+            if grp_id:
+                new_groups.append(str(grp_id))
             xf = sp.find('p:grpSpPr/a:xfrm', NS)
             ntf = tf
             if xf is not None and xf.find('a:chExt', NS) is not None:
@@ -580,7 +716,95 @@ def walk_tree(ctx, tree, rels, layout_root, master_root, tf, source, master_txst
                 gx = tf[0] + (int(off.get('x')) - int(choff.get('x')) * sx) * tf[2]
                 gy = tf[1] + (int(off.get('y')) - int(choff.get('y')) * sy) * tf[3]
                 ntf = (gx, gy, sx * tf[2], sy * tf[3])
-            walk_tree(ctx, sp, rels, layout_root, master_root, ntf, source, master_txstyles, out)
+            walk_tree(ctx, sp, rels, layout_root, master_root, ntf, source, master_txstyles, out, new_groups)
+
+
+def parse_slide_timing(root):
+    timing = root.find('p:timing', NS)
+    if timing is None:
+        return None
+    seq = timing.find('.//p:seq', NS)
+    if seq is None:
+        return None
+    cTn_seq = seq.find('p:cTn', NS)
+    if cTn_seq is None:
+        return None
+    childTnLst = cTn_seq.find('p:childTnLst', NS)
+    if childTnLst is None:
+        return None
+
+    steps = []
+    for par in childTnLst.findall('p:par', NS):
+        step_effects = []
+        for ctn in par.findall('.//p:cTn', NS):
+            pClass = ctn.attrib.get('presetClass')
+            pId = ctn.attrib.get('presetID')
+            subType = ctn.attrib.get('presetSubtype')
+            nodeType = ctn.attrib.get('nodeType', 'clickEffect')
+            dur = ctn.attrib.get('dur')
+            dur_ms = int(dur) if dur and dur.isdigit() else 400
+
+            anim_eff = ctn.find('.//p:animEffect', NS)
+            effect_filter = anim_eff.attrib.get('filter') if anim_eff is not None else None
+
+            for cBhvr in ctn.findall('.//p:cBhvr', NS):
+                tgt = cBhvr.find('p:tgtEl', NS)
+                if tgt is None:
+                    continue
+                spTgt = tgt.find('p:spTgt', NS)
+                if spTgt is None:
+                    continue
+                spid = spTgt.attrib.get('spid')
+                if not spid:
+                    continue
+                txEl = spTgt.find('p:txEl', NS)
+                p_range = None
+                if txEl is not None:
+                    pRg = txEl.find('p:pRg', NS)
+                    if pRg is not None:
+                        st = int(pRg.attrib.get('st', 0))
+                        end = int(pRg.attrib.get('end', st))
+                        p_range = [st, end]
+
+                effect_name = 'appear'
+                if effect_filter:
+                    if 'dissolve' in effect_filter or 'fade' in effect_filter:
+                        effect_name = 'fade'
+                    elif 'wipe' in effect_filter:
+                        if 'left' in effect_filter: effect_name = 'wipe-left'
+                        elif 'right' in effect_filter: effect_name = 'wipe-right'
+                        elif 'up' in effect_filter: effect_name = 'wipe-up'
+                        elif 'down' in effect_filter: effect_name = 'wipe-down'
+                        else: effect_name = 'wipe-right'
+                elif pId == '9':
+                    effect_name = 'fade'
+                elif pId == '22':
+                    if subType == '1': effect_name = 'wipe-down'
+                    elif subType == '2': effect_name = 'wipe-left'
+                    elif subType == '4': effect_name = 'wipe-right'
+                    elif subType == '8': effect_name = 'wipe-up'
+                    else: effect_name = 'wipe-right'
+                elif pClass == 'exit':
+                    effect_name = 'fade-out'
+
+                existing = [e for e in step_effects if e['spid'] == spid and e['para_range'] == p_range and e['type'] == (pClass or 'entr')]
+                if not existing:
+                    step_effects.append({
+                        'spid': spid,
+                        'para_range': p_range,
+                        'type': pClass or 'entr',
+                        'effect': effect_name,
+                        'node_type': nodeType,
+                        'dur_ms': dur_ms
+                    })
+        if step_effects:
+            steps.append({
+                'step': len(steps) + 1,
+                'effects': step_effects
+            })
+    if not steps:
+        return None
+    return {'total_steps': len(steps), 'steps': steps}
 
 
 def background(ctx, root, rels):
@@ -710,6 +934,7 @@ def main():
             'background': own_bg,
             'effective_background': own_bg or layout['background'] or m['background'],
             'notes': notes,
+            'animations': parse_slide_timing(root),
             'shapes': shapes,
         })
 

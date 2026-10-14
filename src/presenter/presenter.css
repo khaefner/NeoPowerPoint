@@ -102,11 +102,91 @@ body, html {
   background: var(--border);
   color: var(--text-primary);
 }
+.btn-micro.active {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 .slide-indicator {
   font-size: 1.05rem;
   font-weight: 600;
   color: var(--text-muted);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* ADB Tablet Pill */
+.adb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.82rem;
+}
+
+.adb-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+}
+
+.adb-dot.connected {
+  background: var(--accent-green);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
+}
+
+.adb-dot.unauthorized {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+}
+
+.adb-dot.not-installed {
+  background: #94a3b8;
+}
+
+.adb-dot.disconnected {
+  background: #ef4444;
+}
+
+.adb-label {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.adb-launch-btn {
+  background: var(--border);
+  color: var(--text-primary);
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.adb-launch-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.panel-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.panel-ink-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Grid layout */
@@ -188,10 +268,57 @@ body, html {
 }
 
 .preview-iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
   border: none;
   background: #fff;
+  z-index: 1;
+}
+
+.preview-mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 5;
+  background: transparent;
+  display: none;
+}
+
+.badge-audience-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 12px;
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--accent-green);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  transition: all 0.2s ease;
+}
+
+.live-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  box-shadow: 0 0 6px var(--accent-green);
+  animation: pulse-dot 2s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
 }
 
 /* Side Column */
@@ -317,4 +444,8 @@ body, html {
   border-color: var(--accent);
   color: var(--text-primary);
   font-weight: 600;
+}
+.strip-item.is-hidden {
+  opacity: 0.5;
+  border-style: dashed;
 }
