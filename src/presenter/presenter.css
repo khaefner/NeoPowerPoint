@@ -374,6 +374,23 @@ body, html {
   color: #38bdf8;
   margin: 8px 0 4px;
 }
+.notes-body a {
+  color: #38bdf8;
+  text-decoration: underline;
+  cursor: pointer;
+  word-break: break-all;
+}
+.notes-body a:hover {
+  color: #7dd3fc;
+}
+.notes-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 10px 0;
+  display: block;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
 
 .notes-placeholder {
   color: var(--text-muted);

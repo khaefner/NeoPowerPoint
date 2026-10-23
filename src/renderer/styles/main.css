@@ -614,6 +614,23 @@ body, html {
   color: #38bdf8;
   margin: 6px 0 2px;
 }
+.slide-notes-editor a, .modal-notes-editor a {
+  color: #38bdf8;
+  text-decoration: underline;
+  cursor: pointer;
+  word-break: break-all;
+}
+.slide-notes-editor a:hover, .modal-notes-editor a:hover {
+  color: #7dd3fc;
+}
+.slide-notes-editor img, .modal-notes-editor img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 8px 0;
+  display: block;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
 
 /* Expanded Speaker Notes Modal Window */
 .notes-modal-container {

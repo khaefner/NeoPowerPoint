@@ -2,7 +2,8 @@ export interface SlideMetadata {
   id: string;
   title: string;
   path: string;           // Relative path from presentation root to html file
-  notes?: string;         // Presenter notes (Markdown / plain text)
+  notes?: string;         // Presenter notes (Markdown / plain text / HTML)
+  notesPath?: string;     // Relative path to notes HTML file (e.g. slides/01-intro/notes.html)
   durationSec?: number;   // Recommended duration (in seconds)
   autoAdvanceSec?: number;// Optional auto-advance timer (0 or undefined for manual)
   transition?: 'none' | 'fade' | 'slide-left' | 'zoom';

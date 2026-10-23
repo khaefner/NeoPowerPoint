@@ -21,9 +21,11 @@ export interface PresenterAPI {
   getAdbStatus: () => Promise<any>;
   launchTabletBrowser: () => Promise<{ success: boolean; error?: string }>;
   onAdbDevicesChanged: (callback: (devices: any[]) => void) => () => void;
+  openExternalUrl: (url: string) => Promise<boolean>;
 }
 
 const api: PresenterAPI = {
+  openExternalUrl: (url) => ipcRenderer.invoke('shell:open-external', url),
   onSyncState: (callback) => {
     const handler = (_: any, state: any) => callback(state);
     ipcRenderer.on('presenter:state-update', handler);

@@ -161,6 +161,20 @@ btnNotesLarger.addEventListener('click', () => {
   }
 });
 
+// Clickable links in speaker notes
+notesContentEl.addEventListener('click', (e: MouseEvent) => {
+  const target = (e.target as HTMLElement).closest('a');
+  if (target && target.getAttribute('href')) {
+    e.preventDefault();
+    const href = target.getAttribute('href')!;
+    if (window.presenterAPI && window.presenterAPI.openExternalUrl) {
+      window.presenterAPI.openExternalUrl(href);
+    } else {
+      window.open(href, '_blank');
+    }
+  }
+});
+
 // Navigation actions
 btnPrev.addEventListener('click', () => window.presenterAPI.prevSlide());
 btnNext.addEventListener('click', () => window.presenterAPI.nextSlide());

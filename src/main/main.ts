@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, clipboard, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { DeckService } from './deck-service';
@@ -253,6 +253,47 @@ function createMainWindow(): void {
     logger.log(levelMap[level] || 'INFO', 'RendererConsole', message);
   });
 
+  mainWindow.webContents.setWindowOpenHandler((details) => {
+    if (details.url.startsWith('http:') || details.url.startsWith('https:') || details.url.startsWith('mailto:')) {
+      shell.openExternal(details.url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  mainWindow.webContents.on('context-menu', (_e, params) => {
+    const menuTemplate: any[] = [];
+    if (params.isEditable) {
+      menuTemplate.push(
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { type: 'separator' },
+        { role: 'selectAll' }
+      );
+    } else if (params.selectionText && params.selectionText.trim().length > 0) {
+      menuTemplate.push(
+        { role: 'copy' },
+        { role: 'selectAll' }
+      );
+    }
+    if (menuTemplate.length > 0) {
+      Menu.buildFromTemplate(menuTemplate).popup({ window: mainWindow || undefined });
+    }
+  });
+
   mainWindow.loadURL('neopres://deck/renderer/index.html');
 
   mainWindow.webContents.on('did-finish-load', () => {
@@ -316,6 +357,47 @@ function openPresenterWindow(): boolean {
 
   presenterWindow.webContents.on('console-message', (_event, _level, message) => {
     console.log(`[PRESENTER CONSOLE]: ${message}`);
+  });
+
+  presenterWindow.webContents.setWindowOpenHandler((details) => {
+    if (details.url.startsWith('http:') || details.url.startsWith('https:') || details.url.startsWith('mailto:')) {
+      shell.openExternal(details.url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+
+  presenterWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  presenterWindow.webContents.on('context-menu', (_e, params) => {
+    const menuTemplate: any[] = [];
+    if (params.isEditable) {
+      menuTemplate.push(
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { type: 'separator' },
+        { role: 'selectAll' }
+      );
+    } else if (params.selectionText && params.selectionText.trim().length > 0) {
+      menuTemplate.push(
+        { role: 'copy' },
+        { role: 'selectAll' }
+      );
+    }
+    if (menuTemplate.length > 0) {
+      Menu.buildFromTemplate(menuTemplate).popup({ window: presenterWindow || undefined });
+    }
   });
 
   presenterWindow.loadURL('neopres://deck/presenter/index.html');
@@ -423,6 +505,21 @@ function buildAppMenu(): void {
         },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { type: 'separator' },
+        { role: 'selectAll' }
       ]
     },
     {
@@ -698,6 +795,60 @@ ipcMain.handle('deck:save-slide-html', async (_, slideRelPath: string, htmlConte
   const activePath = deckService.getActiveDeckPath();
   if (!activePath) return false;
   return deckService.saveSlideHtml(activePath, slideRelPath, htmlContent);
+});
+
+ipcMain.handle('deck:save-notes', async (_, slideRelPath: string, notesContent: string, notesPath?: string) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.saveSlideNotes(activePath, slideRelPath, notesContent, notesPath);
+});
+
+ipcMain.handle('deck:load-notes', async (_, notesPathOrSlidePath: string) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return '';
+  return deckService.loadSlideNotes(activePath, notesPathOrSlidePath);
+});
+
+ipcMain.handle('deck:open-notes-in-browser', async (_, slideRelPath: string) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return false;
+  let notesRelPath = slideRelPath.replace(/\\/g, '/');
+  if (notesRelPath.endsWith('/index.html')) {
+    notesRelPath = notesRelPath.replace(/\/index\.html$/, '/notes.html');
+  } else if (!notesRelPath.endsWith('.html')) {
+    notesRelPath += '.html';
+  } else if (!notesRelPath.endsWith('notes.html')) {
+    notesRelPath = notesRelPath.replace(/\.html$/, '-notes.html');
+  }
+  const fullPath = path.resolve(activePath, notesRelPath);
+  if (fs.existsSync(fullPath)) {
+    await shell.openPath(fullPath);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('clipboard:read-text', async () => {
+  return clipboard.readText();
+});
+
+ipcMain.handle('clipboard:read-image', async () => {
+  const img = clipboard.readImage();
+  if (img.isEmpty()) return null;
+  return img.toDataURL();
+});
+
+ipcMain.handle('clipboard:write-text', async (_, text: string) => {
+  clipboard.writeText(text);
+  return true;
+});
+
+ipcMain.handle('shell:open-external', async (_, url: string) => {
+  if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:'))) {
+    await shell.openExternal(url);
+    return true;
+  }
+  return false;
 });
 
 ipcMain.handle('deck:get-manifest', async () => {

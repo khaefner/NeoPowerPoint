@@ -258,6 +258,174 @@ export class DeckService {
   }
 
   /**
+   * Resolves the canonical relative notes path for a slide (e.g. slides/01-intro/notes.html).
+   */
+  getSlideNotesPath(slide: { path: string; notesPath?: string }): string {
+    if (slide.notesPath) {
+      return slide.notesPath.replace(/\\/g, '/');
+    }
+    const norm = slide.path.replace(/\\/g, '/');
+    if (norm.endsWith('/index.html')) {
+      return norm.replace(/\/index\.html$/, '/notes.html');
+    }
+    if (norm.endsWith('.html')) {
+      return norm.replace(/\.html$/, '-notes.html');
+    }
+    return path.posix.join(path.posix.dirname(norm), 'notes.html');
+  }
+
+  /**
+   * Formats a complete, self-contained HTML document for speaker notes.
+   */
+  formatNotesHtml(title: string, notesBody: string): string {
+    const safeTitle = (title || 'Slide Notes')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    const bodyContent = notesBody && notesBody.trim() ? notesBody : '<p></p>';
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Speaker Notes - ${safeTitle}</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 28px 32px;
+      line-height: 1.6;
+      color: #1e293b;
+      background: #ffffff;
+      max-width: 900px;
+      margin-inline: auto;
+    }
+    @media (prefers-color-scheme: dark) {
+      body {
+        color: #f1f5f9;
+        background: #0f172a;
+      }
+    }
+    h1, h2, h3, h4 {
+      margin-top: 1.2em;
+      margin-bottom: 0.5em;
+      font-weight: 600;
+    }
+    p {
+      margin: 0.6em 0;
+    }
+    a {
+      color: #3b82f6;
+      text-decoration: underline;
+      word-break: break-all;
+    }
+    a:hover {
+      color: #60a5fa;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      margin: 12px 0;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+      display: block;
+    }
+    ul, ol {
+      padding-left: 24px;
+      margin: 0.6em 0;
+    }
+    li {
+      margin: 0.3em 0;
+    }
+    blockquote {
+      border-left: 3px solid #3b82f6;
+      margin: 1em 0;
+      padding-left: 14px;
+      color: #64748b;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 0.9em;
+      padding: 2px 6px;
+      background: rgba(148, 163, 184, 0.2);
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+${bodyContent}
+</body>
+</html>
+`;
+  }
+
+  /**
+   * Extracts the body contents from a full HTML document or returns the HTML string directly.
+   */
+  extractNotesBody(html: string): string {
+    if (!html) return '';
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    if (bodyMatch) {
+      return bodyMatch[1].trim();
+    }
+    return html.trim();
+  }
+
+  /**
+   * Saves speaker notes to an external HTML file (e.g. slides/01-intro/notes.html)
+   * and synchronizes with the active manifest.
+   */
+  async saveSlideNotes(deckPath: string, slideRelPath: string, notesContent: string, notesPath?: string): Promise<{ notesPath: string; notes: string }> {
+    const manifest = this.activeManifest;
+    const slide = manifest?.slides.find(s => s.path === slideRelPath || (notesPath && s.notesPath === notesPath));
+    const targetRelNotesPath = notesPath || (slide ? this.getSlideNotesPath(slide) : (slideRelPath.endsWith('/index.html') ? slideRelPath.replace(/\/index\.html$/, '/notes.html') : slideRelPath.replace(/\.html$/, '-notes.html')));
+
+    const fullPath = path.resolve(deckPath, targetRelNotesPath);
+    if (!fullPath.startsWith(path.resolve(deckPath))) {
+      throw new Error('Directory traversal attempt detected');
+    }
+
+    const title = slide?.title || 'Slide Notes';
+    const fullHtml = this.formatNotesHtml(title, notesContent);
+
+    await fs.promises.mkdir(path.dirname(fullPath), { recursive: true });
+    await fs.promises.writeFile(fullPath, fullHtml, 'utf-8');
+
+    if (slide) {
+      slide.notesPath = targetRelNotesPath;
+      slide.notes = notesContent;
+    }
+
+    return { notesPath: targetRelNotesPath, notes: notesContent };
+  }
+
+  /**
+   * Loads speaker notes HTML file from disk and returns the body HTML content.
+   */
+  async loadSlideNotes(deckPath: string, notesPathOrSlidePath: string): Promise<string> {
+    let relPath = notesPathOrSlidePath.replace(/\\/g, '/');
+    if (relPath.endsWith('/index.html')) {
+      relPath = relPath.replace(/\/index\.html$/, '/notes.html');
+    } else if (relPath.endsWith('.html') && !relPath.endsWith('notes.html') && !relPath.endsWith('-notes.html')) {
+      relPath = relPath.replace(/\.html$/, '-notes.html');
+    }
+
+    const fullPath = path.resolve(deckPath, relPath);
+    if (!fullPath.startsWith(path.resolve(deckPath))) {
+      throw new Error('Directory traversal attempt detected');
+    }
+    if (!fs.existsSync(fullPath)) {
+      return '';
+    }
+    const raw = await fs.promises.readFile(fullPath, 'utf-8');
+    return this.extractNotesBody(raw);
+  }
+
+  /**
    * Saves updated manifest (e.g. reordered slides, modified notes, settings).
    */
   async saveManifest(folderPath: string, manifest: DeckManifest): Promise<void> {
@@ -341,6 +509,12 @@ export class DeckService {
 </body>
 </html>`;
     await fs.promises.writeFile(path.join(slide1Dir, 'index.html'), slide1Html, 'utf-8');
+    const slide1Notes = 'Welcome the audience and explain that slides execute real HTML & JavaScript.';
+    await fs.promises.writeFile(
+      path.join(slide1Dir, 'notes.html'),
+      this.formatNotesHtml('Welcome', `<p>${slide1Notes}</p>`),
+      'utf-8'
+    );
 
     // Slide 2: Interactive Particles / Canvas
     const slide2Dir = path.join(slidesDir, '02-interactive-canvas');
@@ -447,6 +621,12 @@ export class DeckService {
 </body>
 </html>`;
     await fs.promises.writeFile(path.join(slide2Dir, 'index.html'), slide2Html, 'utf-8');
+    const slide2Notes = 'Move your mouse to demonstrate live canvas animation and physics.';
+    await fs.promises.writeFile(
+      path.join(slide2Dir, 'notes.html'),
+      this.formatNotesHtml('Interactive Canvas', `<p>${slide2Notes}</p>`),
+      'utf-8'
+    );
 
     const manifest: DeckManifest = {
       version: '1.0.0',
@@ -461,6 +641,7 @@ export class DeckService {
           id: 'slide-1',
           title: 'Welcome',
           path: 'slides/01-welcome/index.html',
+          notesPath: 'slides/01-welcome/notes.html',
           notes: 'Welcome the audience and explain that slides execute real HTML & JavaScript.',
           durationSec: 60,
           transition: 'fade'
@@ -469,6 +650,7 @@ export class DeckService {
           id: 'slide-2',
           title: 'Interactive Canvas',
           path: 'slides/02-interactive-canvas/index.html',
+          notesPath: 'slides/02-interactive-canvas/notes.html',
           notes: 'Move your mouse to demonstrate live canvas animation and physics.',
           durationSec: 90,
           transition: 'fade'
@@ -522,10 +704,15 @@ export class DeckService {
 
     await fs.promises.writeFile(path.join(slideDir, 'index.html'), htmlContent, 'utf-8');
 
+    const notesPath = path.posix.join('slides', folderSlug, 'notes.html');
+    const notesHtml = this.formatNotesHtml(title, '');
+    await fs.promises.writeFile(path.join(slideDir, 'notes.html'), notesHtml, 'utf-8');
+
     const newSlide: SlideMetadata = {
       id: `slide-${Date.now()}`,
       title,
       path: path.posix.join('slides', folderSlug, 'index.html'),
+      notesPath,
       notes: '',
       transition: 'fade'
     };
@@ -553,10 +740,15 @@ export class DeckService {
 
     await fs.promises.writeFile(path.join(slideDir, 'index.html'), htmlContent, 'utf-8');
 
+    const notesPath = path.posix.join('slides', folderSlug, 'notes.html');
+    const notesHtml = this.formatNotesHtml(title, '');
+    await fs.promises.writeFile(path.join(slideDir, 'notes.html'), notesHtml, 'utf-8');
+
     const newSlide: SlideMetadata = {
       id: `slide-${Date.now()}`,
       title,
       path: path.posix.join('slides', folderSlug, 'index.html'),
+      notesPath,
       notes: '',
       transition: 'fade'
     };
@@ -597,11 +789,25 @@ export class DeckService {
 
     await fs.promises.writeFile(path.join(slideDir, 'index.html'), htmlContent, 'utf-8');
 
+    const newNotesPath = path.posix.join('slides', folderSlug, 'notes.html');
+    let notesContent = sourceSlide.notes || '';
+    const sourceNotesPath = sourceSlide.notesPath ? path.resolve(folderPath, sourceSlide.notesPath) : path.resolve(path.dirname(sourceHtmlPath), 'notes.html');
+    if (fs.existsSync(sourceNotesPath)) {
+      const srcNotesFile = await fs.promises.readFile(sourceNotesPath, 'utf-8');
+      await fs.promises.writeFile(path.join(slideDir, 'notes.html'), srcNotesFile, 'utf-8');
+      notesContent = this.extractNotesBody(srcNotesFile);
+    } else {
+      const notesHtml = this.formatNotesHtml(title, notesContent);
+      await fs.promises.writeFile(path.join(slideDir, 'notes.html'), notesHtml, 'utf-8');
+    }
+
     const newSlide: SlideMetadata = {
       ...sourceSlide,
       id: `slide-${Date.now()}`,
       title,
       path: path.posix.join('slides', folderSlug, 'index.html'),
+      notesPath: newNotesPath,
+      notes: notesContent,
     };
 
     manifest.slides.splice(slideIndex + 1, 0, newSlide);
@@ -924,11 +1130,17 @@ export class DeckService {
 
     await fs.promises.writeFile(path.join(slideDir, 'index.html'), htmlContent, 'utf-8');
 
+    const notesPath = path.posix.join('slides', folderSlug, 'notes.html');
+    const notesContent = `<p>Embedded interactive webpage: <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a></p>`;
+    const notesHtml = this.formatNotesHtml(title, notesContent);
+    await fs.promises.writeFile(path.join(slideDir, 'notes.html'), notesHtml, 'utf-8');
+
     const newSlide: SlideMetadata = {
       id: `slide-${Date.now()}`,
       title,
       path: path.posix.join('slides', folderSlug, 'index.html'),
-      notes: `Embedded interactive webpage: ${safeUrl}`,
+      notesPath,
+      notes: notesContent,
       transition: 'fade'
     };
 
@@ -953,21 +1165,33 @@ export class DeckService {
           const indexHtml = path.join(full, 'index.html');
           if (fs.existsSync(indexHtml)) {
             const title = entry.name.replace(/^\d+[-_]?/, '').replace(/[-_]/g, ' ') || entry.name;
+            const notesFile = path.join(full, 'notes.html');
+            let slideNotes = '';
+            const notesPath = path.posix.join(rel, 'notes.html');
+            if (fs.existsSync(notesFile)) {
+              try {
+                slideNotes = this.extractNotesBody(fs.readFileSync(notesFile, 'utf-8'));
+              } catch (_) {}
+            }
             slides.push({
               id: `slide-${slides.length + 1}`,
               title: title.charAt(0).toUpperCase() + title.slice(1),
               path: path.posix.join(rel, 'index.html'),
-              notes: ''
+              notesPath,
+              notes: slideNotes
             });
           } else {
             await findHtmlFiles(full, rel);
           }
-        } else if (entry.isFile() && entry.name.endsWith('.html') && entry.name !== 'index.html') {
+        } else if (entry.isFile() && entry.name.endsWith('.html') && entry.name !== 'index.html' && entry.name !== 'notes.html' && !entry.name.endsWith('-notes.html')) {
           const title = entry.name.replace(/\.html$/, '').replace(/^\d+[-_]?/, '').replace(/[-_]/g, ' ');
+          const relPosix = rel.split(path.sep).join('/');
+          const notesRel = relPosix.replace(/\.html$/, '-notes.html');
           slides.push({
             id: `slide-${slides.length + 1}`,
             title: title.charAt(0).toUpperCase() + title.slice(1),
-            path: rel.split(path.sep).join('/'),
+            path: relPosix,
+            notesPath: notesRel,
             notes: ''
           });
         }
@@ -1008,6 +1232,27 @@ export class DeckService {
       // Normalize slashes to posix
       if (slide.path) {
         slide.path = slide.path.replace(/\\/g, '/');
+      }
+      if (!slide.notesPath) {
+        slide.notesPath = this.getSlideNotesPath(slide);
+      } else {
+        slide.notesPath = slide.notesPath.replace(/\\/g, '/');
+      }
+
+      // Check if notes.html exists on disk; load into slide.notes if present,
+      // or write notes.html to disk if missing and slide.notes has content.
+      try {
+        const fullNotesPath = path.resolve(folderPath, slide.notesPath);
+        if (fs.existsSync(fullNotesPath)) {
+          const notesHtml = fs.readFileSync(fullNotesPath, 'utf-8');
+          slide.notes = this.extractNotesBody(notesHtml);
+        } else if (slide.notes && slide.notes.trim()) {
+          const fullHtml = this.formatNotesHtml(slide.title, slide.notes);
+          fs.mkdirSync(path.dirname(fullNotesPath), { recursive: true });
+          fs.writeFileSync(fullNotesPath, fullHtml, 'utf-8');
+        }
+      } catch (err: any) {
+        logger.warn('DeckService', `Could not synchronize notes file for slide ${slide.id}: ${err.message}`);
       }
     });
   }

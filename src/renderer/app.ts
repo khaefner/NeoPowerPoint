@@ -414,6 +414,9 @@ class PresentationApp {
       if (filePath.toLowerCase().endsWith('deck.json')) {
         // Manifest updated
         this.reloadManifest();
+      } else if (filePath.toLowerCase().endsWith('notes.html') || filePath.toLowerCase().endsWith('-notes.html')) {
+        // Speaker notes updated on disk
+        this.reloadSlideNotes();
       } else {
         // Slide or asset changed, reload current slide iframe
         this.reloadCurrentSlide();
@@ -1494,6 +1497,21 @@ class PresentationApp {
       this.modalNotesEditorEl.innerHTML = rawNotes;
     }
 
+    // Refresh from disk notes.html if available
+    const activeSlideIndex = this.currentIndex;
+    if (currentSlide.notesPath || currentSlide.path) {
+      window.electronAPI.loadSlideNotes(currentSlide.notesPath || currentSlide.path).then((diskNotes) => {
+        if (this.currentIndex === activeSlideIndex && diskNotes !== undefined && diskNotes !== null) {
+          if (diskNotes !== currentSlide.notes) {
+            currentSlide.notes = diskNotes;
+            if (this.notesEditorEl) this.notesEditorEl.innerHTML = diskNotes;
+            if (this.modalNotesEditorEl) this.modalNotesEditorEl.innerHTML = diskNotes;
+            this.syncPresenterState();
+          }
+        }
+      }).catch(() => {});
+    }
+
     // Synchronize to Presenter View
     this.syncPresenterState();
     this.inkOverlay?.setSlideIndex(this.currentIndex);
@@ -1833,6 +1851,10 @@ class PresentationApp {
     document.getElementById('btn-notes-number')?.addEventListener('click', () => this.execNotesCommand('insertOrderedList'));
     document.getElementById('btn-notes-font-down')?.addEventListener('click', () => this.adjustNotesFontSize(-1, 'sidebar'));
     document.getElementById('btn-notes-font-up')?.addEventListener('click', () => this.adjustNotesFontSize(1, 'sidebar'));
+    document.getElementById('btn-notes-paste')?.addEventListener('click', () => this.pasteFromClipboard('sidebar'));
+    document.getElementById('btn-notes-link')?.addEventListener('click', () => this.promptInsertLink('sidebar'));
+    document.getElementById('btn-notes-image')?.addEventListener('click', () => this.promptInsertImage('sidebar'));
+    document.getElementById('btn-notes-open-file')?.addEventListener('click', () => this.openNotesInBrowser());
 
     // Modal Toolbar Buttons
     document.getElementById('btn-m-notes-bold')?.addEventListener('click', () => this.execNotesCommand('bold'));
@@ -1842,10 +1864,221 @@ class PresentationApp {
     document.getElementById('btn-m-notes-number')?.addEventListener('click', () => this.execNotesCommand('insertOrderedList'));
     document.getElementById('btn-m-notes-font-down')?.addEventListener('click', () => this.adjustNotesFontSize(-1, 'modal'));
     document.getElementById('btn-m-notes-font-up')?.addEventListener('click', () => this.adjustNotesFontSize(1, 'modal'));
+    document.getElementById('btn-m-notes-paste')?.addEventListener('click', () => this.pasteFromClipboard('modal'));
+    document.getElementById('btn-m-notes-link')?.addEventListener('click', () => this.promptInsertLink('modal'));
+    document.getElementById('btn-m-notes-image')?.addEventListener('click', () => this.promptInsertImage('modal'));
+    document.getElementById('btn-m-notes-open-file')?.addEventListener('click', () => this.openNotesInBrowser());
+
+    // Editor events: Copy & Paste, URLs, and Drag-and-drop Images
+    this.setupNotesEditorEvents(this.notesEditorEl, 'sidebar');
+    this.setupNotesEditorEvents(this.modalNotesEditorEl, 'modal');
 
     // Live Typing & Auto-saving
     this.notesEditorEl?.addEventListener('input', () => this.onNotesInput('sidebar'));
     this.modalNotesEditorEl?.addEventListener('input', () => this.onNotesInput('modal'));
+  }
+
+  private setupNotesEditorEvents(editor: HTMLElement, target: 'sidebar' | 'modal'): void {
+    if (!editor) return;
+
+    // Paste event handler: handles images, URLs, and rich text seamlessly
+    editor.addEventListener('paste', async (e: ClipboardEvent) => {
+      const clipboardData = e.clipboardData;
+      if (!clipboardData) return;
+
+      // 1. Image on clipboard (from screenshot, copied image, or file)
+      const items = Array.from(clipboardData.items || []);
+      const imageItem = items.find((item) => item.type.startsWith('image/'));
+      if (imageItem) {
+        e.preventDefault();
+        const file = imageItem.getAsFile();
+        if (file) {
+          await this.insertImageFileIntoNotes(file, target);
+          return;
+        }
+      }
+
+      const files = Array.from(clipboardData.files || []);
+      const imageFile = files.find((f) => f.type.startsWith('image/'));
+      if (imageFile) {
+        e.preventDefault();
+        await this.insertImageFileIntoNotes(imageFile, target);
+        return;
+      }
+
+      // 2. Plain text URL
+      const text = clipboardData.getData('text/plain').trim();
+      if (this.isValidUrl(text)) {
+        e.preventDefault();
+        const sel = window.getSelection();
+        const selectedText = (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) ? sel.toString().trim() : '';
+        const linkHtml = `<a href="${this.escapeHtml(text)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(selectedText || text)}</a>`;
+        document.execCommand('insertHTML', false, linkHtml);
+        this.onNotesInput(target);
+        return;
+      }
+    });
+
+    // Drag and drop image files directly into the notes editor
+    editor.addEventListener('dragover', (e: DragEvent) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+
+    editor.addEventListener('drop', async (e: DragEvent) => {
+      if (!e.dataTransfer || !e.dataTransfer.files) return;
+      const files = Array.from(e.dataTransfer.files);
+      const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        for (const img of imageFiles) {
+          await this.insertImageFileIntoNotes(img, target);
+        }
+      }
+    });
+
+    // Click handler for links: Ctrl/Cmd click opens external link
+    editor.addEventListener('click', (e: MouseEvent) => {
+      const targetEl = (e.target as HTMLElement).closest('a');
+      if (targetEl && targetEl.getAttribute('href')) {
+        const href = targetEl.getAttribute('href')!;
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          window.electronAPI.openExternalUrl(href);
+        }
+      }
+    });
+  }
+
+  private isValidUrl(str: string): boolean {
+    if (!str) return false;
+    const trimmed = str.trim();
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://') && !trimmed.startsWith('mailto:')) {
+      return false;
+    }
+    try {
+      new URL(trimmed);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private insertImageFileIntoNotes(file: File, target: 'sidebar' | 'modal'): Promise<void> {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const editor = target === 'sidebar' ? this.notesEditorEl : this.modalNotesEditorEl;
+        editor.focus();
+        const imgHtml = `<img src="${dataUrl}" alt="${this.escapeHtml(file.name || 'Notes Image')}" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" />`;
+        document.execCommand('insertHTML', false, imgHtml);
+        this.onNotesInput(target);
+        resolve();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  private promptInsertLink(target: 'sidebar' | 'modal'): void {
+    const editor = target === 'sidebar' ? this.notesEditorEl : this.modalNotesEditorEl;
+    editor.focus();
+    const sel = window.getSelection();
+    let selectedText = '';
+    if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+      selectedText = sel.toString().trim();
+    }
+    const defaultUrl = selectedText && this.isValidUrl(selectedText) ? selectedText : 'https://';
+    const url = prompt('Enter or paste URL (e.g. https://example.com):', defaultUrl);
+    if (!url || !url.trim()) return;
+    const cleanUrl = url.trim();
+    const linkText = selectedText || cleanUrl;
+    const linkHtml = `<a href="${this.escapeHtml(cleanUrl)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(linkText)}</a>`;
+    document.execCommand('insertHTML', false, linkHtml);
+    this.onNotesInput(target);
+  }
+
+  private async promptInsertImage(target: 'sidebar' | 'modal'): Promise<void> {
+    const editor = target === 'sidebar' ? this.notesEditorEl : this.modalNotesEditorEl;
+    editor.focus();
+
+    // Check if clipboard contains an image first
+    const clipboardImg = await window.electronAPI.readClipboardImage();
+    if (clipboardImg) {
+      const useClipboard = confirm('An image was detected on your clipboard! Paste this clipboard image into notes? (Click Cancel to choose an image file from disk)');
+      if (useClipboard) {
+        const imgHtml = `<img src="${clipboardImg}" alt="Pasted Clipboard Image" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" />`;
+        document.execCommand('insertHTML', false, imgHtml);
+        this.onNotesInput(target);
+        return;
+      }
+    }
+
+    // Otherwise trigger file input
+    const fileInput = document.getElementById('notes-image-file-input') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.onchange = async () => {
+        if (fileInput.files && fileInput.files[0]) {
+          await this.insertImageFileIntoNotes(fileInput.files[0], target);
+          fileInput.value = '';
+        }
+      };
+      fileInput.click();
+    }
+  }
+
+  private async pasteFromClipboard(target: 'sidebar' | 'modal'): Promise<void> {
+    const editor = target === 'sidebar' ? this.notesEditorEl : this.modalNotesEditorEl;
+    editor.focus();
+
+    // Check for image on clipboard first
+    const imgData = await window.electronAPI.readClipboardImage();
+    if (imgData) {
+      const imgHtml = `<img src="${imgData}" alt="Pasted Image" style="max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block;" />`;
+      document.execCommand('insertHTML', false, imgHtml);
+      this.onNotesInput(target);
+      return;
+    }
+
+    // Check for text on clipboard
+    const text = await window.electronAPI.readClipboardText();
+    if (text) {
+      const trimmed = text.trim();
+      if (this.isValidUrl(trimmed)) {
+        const sel = window.getSelection();
+        const selectedText = (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) ? sel.toString().trim() : '';
+        const linkHtml = `<a href="${this.escapeHtml(trimmed)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(selectedText || trimmed)}</a>`;
+        document.execCommand('insertHTML', false, linkHtml);
+      } else {
+        document.execCommand('insertText', false, text);
+      }
+      this.onNotesInput(target);
+    }
+  }
+
+  private async openNotesInBrowser(): Promise<void> {
+    if (!this.manifest || !this.manifest.slides[this.currentIndex]) return;
+    const cur = this.manifest.slides[this.currentIndex];
+    // Ensure saved first
+    await this.saveNotes();
+    const success = await window.electronAPI.openNotesInBrowser(cur.notesPath || cur.path);
+    if (!success) {
+      alert('Could not locate notes.html file to open in browser.');
+    }
+  }
+
+  private async reloadSlideNotes(): Promise<void> {
+    if (!this.manifest || !this.manifest.slides[this.currentIndex]) return;
+    const cur = this.manifest.slides[this.currentIndex];
+    const notesContent = await window.electronAPI.loadSlideNotes(cur.notesPath || cur.path);
+    if (notesContent !== undefined && notesContent !== null) {
+      cur.notes = notesContent;
+      if (this.notesEditorEl) this.notesEditorEl.innerHTML = notesContent;
+      if (this.modalNotesEditorEl) this.modalNotesEditorEl.innerHTML = notesContent;
+      this.syncPresenterState();
+    }
   }
 
   private execNotesCommand(cmd: string, val: string | undefined = undefined): void {
@@ -1901,6 +2134,14 @@ class PresentationApp {
     if (!this.manifest || !this.manifest.slides[this.currentIndex]) return;
     const cur = this.manifest.slides[this.currentIndex];
     cur.notes = this.notesEditorEl.innerHTML;
+    if (!cur.notesPath) {
+      if (cur.path.endsWith('/index.html')) {
+        cur.notesPath = cur.path.replace(/\/index\.html$/, '/notes.html');
+      } else {
+        cur.notesPath = cur.path.replace(/\.html$/, '-notes.html');
+      }
+    }
+    await window.electronAPI.saveSlideNotes(cur.path, cur.notes, cur.notesPath);
     await window.electronAPI.saveManifest(this.manifest);
     this.syncPresenterState();
     if (this.notesSaveStatusEl) {

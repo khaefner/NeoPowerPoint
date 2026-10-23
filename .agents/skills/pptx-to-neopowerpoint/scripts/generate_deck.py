@@ -1068,11 +1068,56 @@ def main():
 
         rel_path = f'slides/{folder_name}/index.html'
         notes = (s.get('notes') or '').strip()
+        notes_rel_path = f'slides/{folder_name}/notes.html'
+
+        # Generate clean notes.html for the slide
+        safe_notes_title = slide_title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        notes_body = f'<p>{notes}</p>' if notes and not notes.startswith('<') else (notes or '<p></p>')
+        notes_html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Speaker Notes - {safe_notes_title}</title>
+  <style>
+    :root {{ color-scheme: light dark; }}
+    body {{
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 28px 32px;
+      line-height: 1.6;
+      color: #1e293b;
+      background: #ffffff;
+      max-width: 900px;
+      margin-inline: auto;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      body {{ color: #f1f5f9; background: #0f172a; }}
+    }}
+    h1, h2, h3, h4 {{ margin-top: 1.2em; margin-bottom: 0.5em; font-weight: 600; }}
+    p {{ margin: 0.6em 0; }}
+    a {{ color: #3b82f6; text-decoration: underline; word-break: break-all; }}
+    a:hover {{ color: #60a5fa; }}
+    img {{ max-width: 100%; height: auto; border-radius: 8px; margin: 12px 0; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); display: block; }}
+    ul, ol {{ padding-left: 24px; margin: 0.6em 0; }}
+    li {{ margin: 0.3em 0; }}
+    blockquote {{ border-left: 3px solid #3b82f6; margin: 1em 0; padding-left: 14px; color: #64748b; }}
+    code {{ font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.9em; padding: 2px 6px; background: rgba(148, 163, 184, 0.2); border-radius: 4px; }}
+  </style>
+</head>
+<body>
+{notes_body}
+</body>
+</html>
+'''
+        with open(os.path.join(slide_dir, 'notes.html'), 'w', encoding='utf-8') as nf:
+            nf.write(notes_html)
 
         slide_entry = {
             'id': f'slide-{active_idx}',
             'title': slide_title,
             'path': rel_path,
+            'notesPath': notes_rel_path,
             'notes': notes,
             'transition': 'fade'
         }
