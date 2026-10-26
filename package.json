@@ -5,8 +5,8 @@
   "main": "dist/main/main.js",
   "scripts": {
     "build": "node build.mjs",
-    "start": "npm run build && electron . --no-sandbox",
-    "dev": "npm run build && electron . --no-sandbox",
+    "start": "npm run build && electron --js-flags=\"--max-old-space-size=2048\" . --no-sandbox",
+    "dev": "npm run build && electron --js-flags=\"--max-old-space-size=2048\" . --no-sandbox",
     "test": "npm run build && node test/deck-service.test.mjs && node test/slide-sorter.test.mjs && node test/slide-editor.test.mjs && node test/slide-transitions.test.mjs && node test/speaker-notes.test.mjs && node test/pptx-import.test.mjs && node test/slide-animations.test.mjs && node test/web-slide.test.mjs && node test/ai-designer.test.mjs && node test/adb-sync-inking.test.mjs && node test/logger-export.test.mjs",
     "dist": "npm run build && electron-builder",
     "dist:linux": "npm run build && electron-builder --linux",
@@ -59,6 +59,7 @@
   "homepage": "https://github.com/khaefner/NeoPowerPoint#readme",
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
+    "@types/katex": "^0.16.8",
     "@types/node": "^26.6.4",
     "@types/ws": "^8.18.2",
     "electron": "^44.7.0",
@@ -69,6 +70,7 @@
   "dependencies": {
     "adm-zip": "^0.6.1",
     "chokidar": "^5.0.0",
+    "katex": "^0.19.1",
     "ws": "^8.22.0"
   }
 }

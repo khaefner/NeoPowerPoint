@@ -1081,6 +1081,9 @@ def main():
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Speaker Notes - {safe_notes_title}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$$', right: '$$', display: true}}, {{left: '$', right: '$', display: false}}, {{left: '\\(', right: '\\)', display: false}}, {{left: '\\[', right: '\\]', display: true}}]}})"></script>
   <style>
     :root {{ color-scheme: light dark; }}
     body {{
@@ -1105,6 +1108,8 @@ def main():
     li {{ margin: 0.3em 0; }}
     blockquote {{ border-left: 3px solid #3b82f6; margin: 1em 0; padding-left: 14px; color: #64748b; }}
     code {{ font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.9em; padding: 2px 6px; background: rgba(148, 163, 184, 0.2); border-radius: 4px; }}
+    .katex-display {{ margin: 1.2em 0; padding: 8px 0; overflow-x: auto; overflow-y: hidden; }}
+    .katex {{ font-size: 1.15em; }}
   </style>
 </head>
 <body>

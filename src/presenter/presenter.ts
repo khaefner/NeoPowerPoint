@@ -1,5 +1,6 @@
 import { InkOverlay } from '../common/ink-overlay';
 import { InkSyncAction, SlideScrollAction, SlideDomSyncAction, SlideInteractionAction } from '../types/ink';
+import { renderMathInNotes } from '../common/notes-math';
 
 declare global {
   interface Window {
@@ -68,6 +69,8 @@ const nextFrameEl = document.getElementById('next-frame') as HTMLIFrameElement;
 const notesContentEl = document.getElementById('p-notes-content')!;
 const btnNotesSmaller = document.getElementById('btn-notes-smaller')!;
 const btnNotesLarger = document.getElementById('btn-notes-larger')!;
+const btnNotesMathToggle = document.getElementById('btn-notes-math-toggle');
+let isMathRenderEnabled = true;
 
 const btnPrev = document.getElementById('btn-p-prev')!;
 const btnNext = document.getElementById('btn-p-next')!;
@@ -160,6 +163,33 @@ btnNotesLarger.addEventListener('click', () => {
     notesContentEl.style.fontSize = `${notesFontSize}rem`;
   }
 });
+
+if (btnNotesMathToggle) {
+  btnNotesMathToggle.addEventListener('click', () => {
+    isMathRenderEnabled = !isMathRenderEnabled;
+    btnNotesMathToggle.classList.toggle('active', isMathRenderEnabled);
+    updateSpeakerNotes();
+  });
+}
+
+function updateSpeakerNotes(): void {
+  const manifest = currentState?.manifest;
+  const currentIndex = currentState?.currentIndex ?? 0;
+  if (!manifest || !manifest.slides || !manifest.slides[currentIndex]) {
+    notesContentEl.innerHTML = '<p class="notes-placeholder">No speaker notes for this slide.</p>';
+    return;
+  }
+  const currentSlide = manifest.slides[currentIndex];
+  if (currentSlide.notes && currentSlide.notes.trim()) {
+    const rawNotes = currentSlide.notes.trim();
+    const formatted = (rawNotes.startsWith('<') || rawNotes.includes('</'))
+      ? rawNotes
+      : rawNotes.replace(/\n/g, '<br/>');
+    notesContentEl.innerHTML = isMathRenderEnabled ? renderMathInNotes(formatted) : formatted;
+  } else {
+    notesContentEl.innerHTML = '<p class="notes-placeholder">No speaker notes for this slide.</p>';
+  }
+}
 
 // Clickable links in speaker notes
 notesContentEl.addEventListener('click', (e: MouseEvent) => {
@@ -258,14 +288,7 @@ function renderState(state: any) {
       } catch (_) {}
     }
     // Speaker Notes
-    if (currentSlide.notes && currentSlide.notes.trim()) {
-      const notes = currentSlide.notes.trim();
-      notesContentEl.innerHTML = (notes.startsWith('<') || notes.includes('</'))
-        ? notes
-        : notes.replace(/\n/g, '<br/>');
-    } else {
-      notesContentEl.innerHTML = '<p class="notes-placeholder">No speaker notes for this slide.</p>';
-    }
+    updateSpeakerNotes();
 
     // Set active slide index for ink overlay
     inkOverlay.setSlideIndex(currentIndex);

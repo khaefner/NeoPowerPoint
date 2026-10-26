@@ -2,6 +2,7 @@ import { DeckManifest, SlideMetadata } from '../types/deck';
 import { ElectronAPI } from '../preload/preload';
 import { InkOverlay } from '../common/ink-overlay';
 import { InkSyncAction, SlideScrollAction, SlideDomSyncAction, SlideInteractionAction } from '../types/ink';
+import { renderMathInNotes } from '../common/notes-math';
 
 declare const window: Window & { electronAPI: ElectronAPI };
 
@@ -41,7 +42,10 @@ class PresentationApp {
   private deckTitleEl = document.getElementById('deck-title')!;
   private slideCounterEl = document.getElementById('slide-counter')!;
   private notesEditorEl = document.getElementById('slide-notes-editor') as HTMLElement;
+  private slideNotesPreviewEl = document.getElementById('slide-notes-preview') as HTMLElement;
   private modalNotesEditorEl = document.getElementById('modal-notes-editor') as HTMLElement;
+  private modalNotesPreviewEl = document.getElementById('modal-notes-preview') as HTMLElement;
+  private isMathPreviewActive = false;
   private notesModalEl = document.getElementById('notes-modal')!;
   private notesSaveStatusEl = document.getElementById('notes-save-status');
   private notesResizerEl = document.getElementById('notes-resizer')!;
@@ -74,6 +78,8 @@ class PresentationApp {
   private sidebarDraggedIndex: number | null = null;
   private selectedOverviewIndex: number = 0;
   private contextMenuTargetIndex: number = -1;
+  private sidebarObserver: IntersectionObserver | null = null;
+  private overviewObserver: IntersectionObserver | null = null;
 
   constructor() {
     this.setupEventListeners();
@@ -1371,6 +1377,8 @@ class PresentationApp {
 
       const slideUrl = `neopres://deck/${slide.path}`;
       const hiddenBadge = slide.hidden ? `<span class="slide-item-hidden-badge" title="Hidden slide">Hidden</span>` : '';
+      const isInitialBatch = idx < 6 || idx === this.currentIndex;
+      const initialSrc = isInitialBatch ? `src="${slideUrl}"` : '';
 
       item.innerHTML = `
         <div class="slide-item-header">
@@ -1381,7 +1389,7 @@ class PresentationApp {
         <div class="slide-item-preview-container">
           <div class="slide-item-preview-placeholder">📽️</div>
           <div class="slide-item-preview-scaler">
-            <iframe class="slide-item-preview-frame" src="${slideUrl}" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1" allow="autoplay 'none'"></iframe>
+            <iframe class="slide-item-preview-frame" ${initialSrc} data-src="${slideUrl}" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1" allow="autoplay 'none'"></iframe>
           </div>
           <div class="slide-item-preview-overlay" title="Slide ${idx + 1}: ${this.escapeHtml(slide.title || 'Slide')}${slide.hidden ? ' (Hidden)' : ''}"></div>
         </div>
@@ -1418,8 +1426,35 @@ class PresentationApp {
 
     requestAnimationFrame(() => {
       this.updateSidebarScales();
+      this.setupSidebarLazyLoading();
       requestAnimationFrame(() => this.updateSidebarScales());
     });
+  }
+
+  private setupSidebarLazyLoading(): void {
+    if (this.sidebarObserver) {
+      this.sidebarObserver.disconnect();
+    }
+    if (typeof IntersectionObserver !== 'undefined') {
+      this.sidebarObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const item = entry.target as HTMLElement;
+            const frame = item.querySelector('.slide-item-preview-frame') as HTMLIFrameElement;
+            if (frame && frame.dataset.src && (!frame.src || frame.src === 'about:blank' || !frame.src.startsWith('neopres:'))) {
+              frame.src = frame.dataset.src;
+            }
+          }
+        });
+      }, {
+        root: this.slidesListEl,
+        rootMargin: '250px 0px'
+      });
+
+      this.slidesListEl.querySelectorAll('.slide-item').forEach((el) => {
+        this.sidebarObserver?.observe(el);
+      });
+    }
   }
 
   private setupSidebarDragAndDrop(item: HTMLElement, index: number): void {
@@ -1496,6 +1531,9 @@ class PresentationApp {
     if (this.modalNotesEditorEl) {
       this.modalNotesEditorEl.innerHTML = rawNotes;
     }
+    if (this.isMathPreviewActive) {
+      this.updateNotesMathPreview();
+    }
 
     // Refresh from disk notes.html if available
     const activeSlideIndex = this.currentIndex;
@@ -1506,6 +1544,7 @@ class PresentationApp {
             currentSlide.notes = diskNotes;
             if (this.notesEditorEl) this.notesEditorEl.innerHTML = diskNotes;
             if (this.modalNotesEditorEl) this.modalNotesEditorEl.innerHTML = diskNotes;
+            if (this.isMathPreviewActive) this.updateNotesMathPreview();
             this.syncPresenterState();
           }
         }
@@ -1791,6 +1830,10 @@ class PresentationApp {
       if (idx === this.currentIndex) {
         item.classList.add('active');
         item.scrollIntoView({ block: 'nearest' });
+        const frame = item.querySelector('.slide-item-preview-frame') as HTMLIFrameElement;
+        if (frame && frame.dataset.src && (!frame.src || frame.src === 'about:blank' || !frame.src.startsWith('neopres:'))) {
+          frame.src = frame.dataset.src;
+        }
       } else {
         item.classList.remove('active');
       }
@@ -1854,6 +1897,8 @@ class PresentationApp {
     document.getElementById('btn-notes-paste')?.addEventListener('click', () => this.pasteFromClipboard('sidebar'));
     document.getElementById('btn-notes-link')?.addEventListener('click', () => this.promptInsertLink('sidebar'));
     document.getElementById('btn-notes-image')?.addEventListener('click', () => this.promptInsertImage('sidebar'));
+    document.getElementById('btn-notes-math')?.addEventListener('click', () => this.promptInsertMath('sidebar'));
+    document.getElementById('btn-notes-preview-math')?.addEventListener('click', () => this.toggleMathPreview('sidebar'));
     document.getElementById('btn-notes-open-file')?.addEventListener('click', () => this.openNotesInBrowser());
 
     // Modal Toolbar Buttons
@@ -1867,7 +1912,13 @@ class PresentationApp {
     document.getElementById('btn-m-notes-paste')?.addEventListener('click', () => this.pasteFromClipboard('modal'));
     document.getElementById('btn-m-notes-link')?.addEventListener('click', () => this.promptInsertLink('modal'));
     document.getElementById('btn-m-notes-image')?.addEventListener('click', () => this.promptInsertImage('modal'));
+    document.getElementById('btn-m-notes-math')?.addEventListener('click', () => this.promptInsertMath('modal'));
+    document.getElementById('btn-m-notes-preview-math')?.addEventListener('click', () => this.toggleMathPreview('modal'));
     document.getElementById('btn-m-notes-open-file')?.addEventListener('click', () => this.openNotesInBrowser());
+
+    // Click on math preview to switch back to editing
+    this.slideNotesPreviewEl?.addEventListener('click', () => this.toggleMathPreview('sidebar', false));
+    this.modalNotesPreviewEl?.addEventListener('click', () => this.toggleMathPreview('modal', false));
 
     // Editor events: Copy & Paste, URLs, and Drag-and-drop Images
     this.setupNotesEditorEvents(this.notesEditorEl, 'sidebar');
@@ -2077,6 +2128,7 @@ class PresentationApp {
       cur.notes = notesContent;
       if (this.notesEditorEl) this.notesEditorEl.innerHTML = notesContent;
       if (this.modalNotesEditorEl) this.modalNotesEditorEl.innerHTML = notesContent;
+      if (this.isMathPreviewActive) this.updateNotesMathPreview();
       this.syncPresenterState();
     }
   }
@@ -2106,6 +2158,10 @@ class PresentationApp {
       this.notesEditorEl.innerHTML = this.modalNotesEditorEl.innerHTML;
     }
 
+    if (this.isMathPreviewActive) {
+      this.updateNotesMathPreview();
+    }
+
     if (this.notesAutoSaveTimer) clearTimeout(this.notesAutoSaveTimer);
     this.notesAutoSaveTimer = setTimeout(() => {
       this.saveNotes();
@@ -2122,11 +2178,94 @@ class PresentationApp {
       if (this.modalNotesEditorEl) {
         this.modalNotesEditorEl.innerHTML = this.notesEditorEl.innerHTML;
       }
+      if (this.isMathPreviewActive) {
+        this.updateNotesMathPreview();
+        this.modalNotesEditorEl?.classList.add('hidden');
+        this.modalNotesPreviewEl?.classList.remove('hidden');
+      } else {
+        this.modalNotesEditorEl?.classList.remove('hidden');
+        this.modalNotesPreviewEl?.classList.add('hidden');
+      }
       this.notesModalEl.classList.remove('hidden');
-      this.modalNotesEditorEl?.focus();
+      if (!this.isMathPreviewActive) {
+        this.modalNotesEditorEl?.focus();
+      }
     } else {
       this.notesModalEl.classList.add('hidden');
       this.saveNotes();
+    }
+  }
+
+  private toggleMathPreview(target: 'sidebar' | 'modal', forceState?: boolean): void {
+    const nextState = forceState !== undefined ? forceState : !this.isMathPreviewActive;
+    this.isMathPreviewActive = nextState;
+
+    const btnSidebar = document.getElementById('btn-notes-preview-math');
+    const btnModal = document.getElementById('btn-m-notes-preview-math');
+
+    if (this.isMathPreviewActive) {
+      btnSidebar?.classList.add('active');
+      btnModal?.classList.add('active');
+      this.updateNotesMathPreview();
+      this.notesEditorEl?.classList.add('hidden');
+      this.slideNotesPreviewEl?.classList.remove('hidden');
+      if (this.modalNotesEditorEl && this.modalNotesPreviewEl) {
+        this.modalNotesEditorEl.classList.add('hidden');
+        this.modalNotesPreviewEl.classList.remove('hidden');
+      }
+    } else {
+      btnSidebar?.classList.remove('active');
+      btnModal?.classList.remove('active');
+      this.notesEditorEl?.classList.remove('hidden');
+      this.slideNotesPreviewEl?.classList.add('hidden');
+      if (this.modalNotesEditorEl && this.modalNotesPreviewEl) {
+        this.modalNotesEditorEl.classList.remove('hidden');
+        this.modalNotesPreviewEl.classList.add('hidden');
+      }
+      if (target === 'sidebar') {
+        this.notesEditorEl?.focus();
+      } else {
+        this.modalNotesEditorEl?.focus();
+      }
+    }
+  }
+
+  private updateNotesMathPreview(): void {
+    const rawContent = this.notesEditorEl?.innerHTML || '';
+    const rendered = renderMathInNotes(rawContent);
+    const fallback = '<p class="notes-placeholder">No speaker notes to preview.</p>';
+    if (this.slideNotesPreviewEl) {
+      this.slideNotesPreviewEl.innerHTML = rendered && rendered.trim() ? rendered : fallback;
+    }
+    if (this.modalNotesPreviewEl) {
+      this.modalNotesPreviewEl.innerHTML = rendered && rendered.trim() ? rendered : fallback;
+    }
+  }
+
+  private promptInsertMath(target: 'sidebar' | 'modal'): void {
+    const editor = target === 'sidebar' ? this.notesEditorEl : this.modalNotesEditorEl;
+    if (!editor) return;
+
+    if (this.isMathPreviewActive) {
+      this.toggleMathPreview(target, false);
+    }
+
+    const sel = window.getSelection();
+    const selectedText = (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) ? sel.toString().trim() : '';
+
+    if (selectedText) {
+      const formula = `$${selectedText}$`;
+      document.execCommand('insertText', false, formula);
+      this.onNotesInput(target);
+      return;
+    }
+
+    const input = prompt('Enter LaTeX equation (e.g. d_{\\text{trans}} = \\frac{L}{R} \\times 1000):', 'd_{\\text{trans}} = \\frac{L}{R} \\times 1000\\text{ ms/s}');
+    if (input) {
+      const trimmed = input.trim();
+      const formula = trimmed.startsWith('$') ? trimmed : `$${trimmed}$`;
+      document.execCommand('insertText', false, formula);
+      this.onNotesInput(target);
     }
   }
 
@@ -2498,12 +2637,14 @@ class PresentationApp {
         : '';
 
       const slideUrl = `neopres://deck/${slide.path}`;
+      const isInitialBatch = idx < 8 || idx === this.currentIndex;
+      const initialSrc = isInitialBatch ? `src="${slideUrl}"` : '';
 
       card.innerHTML = `
         <div class="card-preview-container">
           <div class="card-preview-placeholder">📽️</div>
           <div class="card-preview-scaler">
-            <iframe class="card-preview-frame" src="${slideUrl}" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1" allow="autoplay 'none'"></iframe>
+            <iframe class="card-preview-frame" ${initialSrc} data-src="${slideUrl}" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1" allow="autoplay 'none'"></iframe>
           </div>
           <div class="card-preview-overlay" title="Slide ${idx + 1}: ${this.escapeHtml(slide.title || 'Slide')}${slide.hidden ? ' (Hidden)' : ''} • Right-click for options"></div>
         </div>
@@ -2560,12 +2701,39 @@ class PresentationApp {
     // Scroll selected card into view and update scaling
     requestAnimationFrame(() => {
       this.updateOverviewScales();
+      this.setupOverviewLazyLoading();
       const activeCard = this.overviewGridEl.querySelector('.overview-card.active') as HTMLElement;
       if (activeCard) {
         activeCard.scrollIntoView({ block: 'nearest' });
       }
       requestAnimationFrame(() => this.updateOverviewScales());
     });
+  }
+
+  private setupOverviewLazyLoading(): void {
+    if (this.overviewObserver) {
+      this.overviewObserver.disconnect();
+    }
+    if (typeof IntersectionObserver !== 'undefined') {
+      this.overviewObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const card = entry.target as HTMLElement;
+            const frame = card.querySelector('.card-preview-frame') as HTMLIFrameElement;
+            if (frame && frame.dataset.src && (!frame.src || frame.src === 'about:blank' || !frame.src.startsWith('neopres:'))) {
+              frame.src = frame.dataset.src;
+            }
+          }
+        });
+      }, {
+        root: this.overviewGridEl,
+        rootMargin: '350px 0px'
+      });
+
+      this.overviewGridEl.querySelectorAll('.overview-card').forEach((el) => {
+        this.overviewObserver?.observe(el);
+      });
+    }
   }
 
   private setupCardDragAndDrop(card: HTMLElement, index: number): void {

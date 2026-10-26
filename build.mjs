@@ -47,6 +47,16 @@ async function copyStaticAssets() {
   if (fs.existsSync('src/converter')) {
     await copyDir('src/converter', 'dist/converter');
   }
+
+  // Copy KaTeX CSS & fonts for math rendering in speaker notes
+  if (fs.existsSync('node_modules/katex/dist/katex.min.css')) {
+    await fs.promises.copyFile('node_modules/katex/dist/katex.min.css', 'dist/renderer/styles/katex.min.css');
+    await fs.promises.copyFile('node_modules/katex/dist/katex.min.css', 'dist/presenter/katex.min.css');
+  }
+  if (fs.existsSync('node_modules/katex/dist/fonts')) {
+    await copyDir('node_modules/katex/dist/fonts', 'dist/renderer/styles/fonts');
+    await copyDir('node_modules/katex/dist/fonts', 'dist/presenter/fonts');
+  }
 }
 
 async function build() {

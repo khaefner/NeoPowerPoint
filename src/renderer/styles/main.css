@@ -632,6 +632,29 @@ body, html {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
+.slide-notes-preview, .modal-notes-preview {
+  user-select: text;
+  cursor: pointer;
+  overflow-y: auto;
+}
+
+.slide-notes-editor .katex, .modal-notes-editor .katex,
+.slide-notes-preview .katex, .modal-notes-preview .katex {
+  font-size: 1.12em;
+}
+
+.slide-notes-editor .katex-display, .modal-notes-editor .katex-display,
+.slide-notes-preview .katex-display, .modal-notes-preview .katex-display {
+  margin: 12px 0;
+  padding: 8px 12px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
 /* Expanded Speaker Notes Modal Window */
 .notes-modal-container {
   background: var(--bg-surface);

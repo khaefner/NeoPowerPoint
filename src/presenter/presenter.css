@@ -392,6 +392,27 @@ body, html {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 
+.notes-body .katex {
+  font-size: 1.12em;
+}
+
+.notes-body .katex-display {
+  margin: 14px 0;
+  padding: 10px 14px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+.notes-tools .btn-micro.active {
+  background: var(--primary, #3b82f6);
+  color: #ffffff;
+  border-color: var(--primary, #3b82f6);
+}
+
 .notes-placeholder {
   color: var(--text-muted);
   font-style: italic;

@@ -83,14 +83,18 @@ syncServer.on('ink:sync-slide', (slideIndex, strokes) => {
 let latestSlideRect: Electron.Rectangle | null = null;
 let lastCapturedBuffer: Buffer | null = null;
 let isCapturing = false;
+let isCapturingPage = false;
 let captureThrottleTimer: NodeJS.Timeout | null = null;
 let pendingCaptureRequest = false;
+let pendingForceCapture = false;
 let captureStreamInterval: NodeJS.Timeout | null = null;
 let isFrameSubscriptionActive = false;
 let captureTimeoutTimer: NodeJS.Timeout | null = null;
+const MIN_CAPTURE_INTERVAL_MS = 160; // Max ~6 FPS to protect system RAM and match e-ink refresh rates
+let lastCaptureTime = 0;
 
 function hasCaptureConsumer(): boolean {
-  return syncServer.getConnectedClientCount() > 0 || (presenterWindow !== null && !presenterWindow.isDestroyed());
+  return syncServer.getConnectedClientCount() > 0;
 }
 
 async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
@@ -98,13 +102,16 @@ async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
   if (!hasCaptureConsumer()) return;
   if (isCapturing) {
     pendingCaptureRequest = true;
+    if (force) pendingForceCapture = true;
     return;
   }
 
   isCapturing = true;
+  isCapturingPage = true;
   if (captureTimeoutTimer) clearTimeout(captureTimeoutTimer);
   captureTimeoutTimer = setTimeout(() => {
     isCapturing = false;
+    isCapturingPage = false;
   }, 2000);
 
   try {
@@ -120,27 +127,26 @@ async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
     }
 
     const image = await mainWindow.webContents.capturePage(rect);
+    isCapturingPage = false;
+
     if (!image.isEmpty()) {
       let finalImage = image;
       const imgSize = image.getSize();
-      // On macOS Retina (or high-DPI displays), downscale to logical DIPs for fast transmission & e-ink decoding
-      if (rect && imgSize.width > rect.width * 1.25) {
+      // Cap max dimension to 1280 to prevent excessive buffer allocation on high-res displays
+      const maxW = 1280;
+      if (imgSize.width > maxW) {
+        const ratio = maxW / imgSize.width;
+        finalImage = image.resize({ width: maxW, height: Math.round(imgSize.height * ratio), quality: 'good' });
+      } else if (rect && imgSize.width > rect.width * 1.25) {
         finalImage = image.resize({ width: Math.round(rect.width), quality: 'good' });
       }
-      const buffer = finalImage.toJPEG(65);
+      const buffer = finalImage.toJPEG(60);
       if (buffer.length > 0) {
         if (force || !lastCapturedBuffer || !buffer.equals(lastCapturedBuffer)) {
           lastCapturedBuffer = buffer;
           const dataUri = 'data:image/jpeg;base64,' + buffer.toString('base64');
           const slideIndex = latestPresenterState?.currentIndex ?? 0;
           syncServer.broadcastSlideFrame(dataUri, slideIndex);
-          if (presenterWindow && !presenterWindow.isDestroyed()) {
-            presenterWindow.webContents.send('slide:frame', {
-              type: 'slide:frame',
-              slideIndex,
-              data: dataUri
-            });
-          }
         }
       }
     }
@@ -152,24 +158,35 @@ async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
       captureTimeoutTimer = null;
     }
     isCapturing = false;
+    isCapturingPage = false;
+    lastCaptureTime = Date.now();
     if (pendingCaptureRequest) {
+      const nextForce = pendingForceCapture;
       pendingCaptureRequest = false;
-      scheduleSlideCapture(false, 30);
+      pendingForceCapture = false;
+      scheduleSlideCapture(nextForce, MIN_CAPTURE_INTERVAL_MS);
     }
   }
 }
 
 function scheduleSlideCapture(force: boolean = false, delayMs: number = 60): void {
   if (!hasCaptureConsumer()) return;
+  if (force) pendingForceCapture = true;
   if (captureThrottleTimer) {
     pendingCaptureRequest = true;
     return;
   }
 
+  const now = Date.now();
+  const elapsed = now - lastCaptureTime;
+  const waitMs = Math.max(delayMs, MIN_CAPTURE_INTERVAL_MS - elapsed);
+
   captureThrottleTimer = setTimeout(() => {
     captureThrottleTimer = null;
-    captureAndBroadcastSlide(force);
-  }, delayMs);
+    const executeForce = pendingForceCapture || force;
+    pendingForceCapture = false;
+    captureAndBroadcastSlide(executeForce);
+  }, Math.max(0, waitMs));
 }
 
 function updateCaptureStreamingState(): void {
@@ -179,16 +196,17 @@ function updateCaptureStreamingState(): void {
     if (!captureStreamInterval) {
       captureStreamInterval = setInterval(() => {
         if (hasCaptureConsumer() && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
-          captureAndBroadcastSlide(false);
+          scheduleSlideCapture(false, 0);
         }
-      }, 120);
-      logger.info('MainProcess', 'Started background slide capture interval (120ms)');
+      }, 1000);
+      logger.info('MainProcess', 'Started background slide capture heartbeat (1000ms)');
     }
 
     if (!isFrameSubscriptionActive && mainWindow && !mainWindow.isDestroyed()) {
       try {
         mainWindow.webContents.beginFrameSubscription(false, () => {
-          scheduleSlideCapture(false, 50);
+          if (isCapturingPage) return;
+          scheduleSlideCapture(false, MIN_CAPTURE_INTERVAL_MS);
         });
         isFrameSubscriptionActive = true;
         logger.info('MainProcess', 'Started webContents.beginFrameSubscription');
@@ -355,8 +373,14 @@ function openPresenterWindow(): boolean {
     }
   });
 
-  presenterWindow.webContents.on('console-message', (_event, _level, message) => {
-    console.log(`[PRESENTER CONSOLE]: ${message}`);
+  presenterWindow.webContents.on('console-message', (_event, level, message) => {
+    const levelMap: Record<number, 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'> = {
+      0: 'DEBUG',
+      1: 'INFO',
+      2: 'WARN',
+      3: 'ERROR'
+    };
+    logger.log(levelMap[level] || 'INFO', 'PresenterConsole', message);
   });
 
   presenterWindow.webContents.setWindowOpenHandler((details) => {

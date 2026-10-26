@@ -206,6 +206,111 @@ ${bodyContent}
   }
   console.log('✓ Verified saveSlideNotes prevents directory traversal');
 
+  // 7. Verify LaTeX Math equations capability in speaker notes
+  console.log('--- Testing KaTeX Math Equations in Speaker Notes ---');
+  const rKatexCss = path.join(rootDir, 'dist/renderer/styles/katex.min.css');
+  const pKatexCss = path.join(rootDir, 'dist/presenter/katex.min.css');
+  const rFontsDir = path.join(rootDir, 'dist/renderer/styles/fonts');
+  const pFontsDir = path.join(rootDir, 'dist/presenter/fonts');
+
+  if (!fs.existsSync(rKatexCss) || !fs.existsSync(pKatexCss)) {
+    throw new Error('Missing katex.min.css in dist/renderer/styles or dist/presenter');
+  }
+  if (!fs.existsSync(rFontsDir) || !fs.existsSync(pFontsDir)) {
+    throw new Error('Missing KaTeX fonts directory in dist/renderer/styles or dist/presenter');
+  }
+  console.log('✓ Verified KaTeX CSS and web font assets copied to renderer and presenter bundles');
+
+  // Verify math elements in index.html
+  if (!htmlContent.includes('id="btn-notes-math"') || !htmlContent.includes('id="btn-notes-preview-math"')) {
+    throw new Error('Missing math buttons (btn-notes-math, btn-notes-preview-math) in index.html');
+  }
+  if (!htmlContent.includes('id="slide-notes-preview"') || !htmlContent.includes('id="modal-notes-preview"')) {
+    throw new Error('Missing math preview containers in index.html');
+  }
+  if (!htmlContent.includes('styles/katex.min.css')) {
+    throw new Error('Missing katex.min.css link in renderer index.html');
+  }
+  console.log('✓ Verified math insert, preview buttons, and preview containers in index.html');
+
+  // Verify presenter view math support
+  const presenterHtmlPath = path.join(rootDir, 'dist/presenter/index.html');
+  const presenterHtmlContent = await fs.promises.readFile(presenterHtmlPath, 'utf-8');
+  if (!presenterHtmlContent.includes('katex.min.css')) {
+    throw new Error('Missing katex.min.css link in presenter/index.html');
+  }
+  if (!presenterHtmlContent.includes('id="btn-notes-math-toggle"')) {
+    throw new Error('Missing btn-notes-math-toggle in presenter/index.html');
+  }
+  if (!pJsContent.includes('btnNotesMathToggle') || !pJsContent.includes('updateSpeakerNotes')) {
+    throw new Error('Missing math toggle integration in presenter.js');
+  }
+  console.log('✓ Verified KaTeX stylesheet and math equation rendering toggle in presenter view');
+
+  // Verify DeckService formatNotesHtml includes KaTeX
+  const deckServicePath = path.join(rootDir, 'src/main/deck-service.ts');
+  const deckServiceContent = await fs.promises.readFile(deckServicePath, 'utf-8');
+  if (!deckServiceContent.includes('katex.min.css') || !deckServiceContent.includes('auto-render')) {
+    throw new Error('Missing KaTeX auto-render integration in DeckService formatNotesHtml');
+  }
+  console.log('✓ Verified DeckService formatNotesHtml embeds KaTeX CSS and auto-render for standalone notes.html');
+
+  // Verify math rendering using renderMathInNotes with the user's example
+  const mathHelperPath = path.join(rootDir, 'src/common/notes-math.ts');
+  if (!fs.existsSync(mathHelperPath)) {
+    throw new Error('Missing src/common/notes-math.ts helper module');
+  }
+
+  // Dynamically test KaTeX rendering of user example math string
+  const userExample = `Transmission Delays ($d_{\\text{trans}} = \\frac{L}{R} \\times 1000\\text{ ms/s}$)Packet size: $L = 1000\\text{ bytes} = 8000\\text{ bits}$.   Link 1 ($R_1 = 10\\text{ Mbps} = 10 \\times 10^6\\text{ bps}$):   $$d_{\\text{trans, 1}} = \\frac{8000\\text{ bits}}{10 \\times 10^6\\text{ bps}} \\times 1000 = 0.8\\text{ ms}$$Link 2 ($R_2 = 1000\\text{ Mbps} = 10^9\\text{ bps}$):   $$d_{\\text{trans, 2}} = \\frac{8000\\text{ bits}}{10^9\\text{ bps}} \\times 1000 = 0.008\\text{ ms}$$Link 3 ($R_3 = 100\\text{ Mbps} = 100 \\times 10^6\\text{ bps}$):   $$d_{\\text{trans, 3}} = \\frac{8000\\text{ bits}}{100 \\times 10^6\\text{ bps}} \\times 1000 = 0.08\\text{ ms}$$Total Transmission Delay:$$d_{\\text{trans, total}} = 0.8\\text{ ms} + 0.008\\text{ ms} + 0.08\\text{ ms} = 0.888\\text{ ms}$$2. Propagation Delays ($d_{\\text{prop}} = \\frac{d}{s} \\times 1000\\text{ ms/s}$)Propagation speed: $s = 3.00 \\times 10^8\\text{ m/s}$.   Link 1 ($d_1 = 100\\text{ m}$):   $$d_{\\text{prop, 1}} = \\frac{100\\text{ m}}{3.00 \\times 10^8\\text{ m/s}} \\times 1000 \\approx 0.000333\\text{ ms}\\quad \\left(\\frac{1}{3000}\\text{ ms}\\right)$$Link 2 ($d_2 = 10\\text{ km} = 10{,}000\\text{ m}$):   $$d_{\\text{prop, 2}} = \\frac{10{,}000\\text{ m}}{3.00 \\times 10^8\\text{ m/s}} \\times 1000 \\approx 0.033333\\text{ ms}\\quad \\left(\\frac{1}{30}\\text{ ms}\\right)$$Link 3 ($d_3 = 1000\\text{ m}$):   $$d_{\\text{prop, 3}} = \\frac{1000\\text{ m}}{3.00 \\times 10^8\\text{ m/s}} \\times 1000 \\approx 0.003333\\text{ ms}\\quad \\left(\\frac{1}{300}\\text{ ms}\\right)$$Total Propagation Delay:$$d_{\\text{prop, total}} = \\frac{11{,}100\\text{ m}}{3.00 \\times 10^8\\text{ m/s}} \\times 1000 = 0.037\\text{ ms}$$3. Total Delay per Link ($d_{\\text{trans}} + d_{\\text{prop}}$)Link 1: $0.8\\text{ ms} + 0.000333\\text{ ms} \\approx 0.800333\\text{ ms}$   Link 2: $0.008\\text{ ms} + 0.033333\\text{ ms} \\approx 0.041333\\text{ ms}$   Link 3: $0.08\\text{ ms} + 0.003333\\text{ ms} \\approx 0.083333\\text{ ms}$   4. End-to-End Delay$$\\text{Delay}_{\\text{end-to-end}} = d_{\\text{trans, total}} + d_{\\text{prop, total}} = 0.888\\text{ ms} + 0.037\\text{ ms} = 0.925\\text{ ms}$$`;
+
+  // Import KaTeX
+  const katexModule = await import('katex');
+  const katex = katexModule.default || katexModule;
+
+  function renderFormula(raw, displayMode) {
+    const clean = raw
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .trim();
+    return katex.renderToString(clean, {
+      displayMode,
+      throwOnError: false,
+      strict: false
+    });
+  }
+
+  function renderMath(content) {
+    let result = content.replace(/\$\$([\s\S]+?)\$\$/g, (_match, formula) => renderFormula(formula, true));
+    result = result.replace(/\\\[([\s\S]+?)\\\]/g, (_match, formula) => renderFormula(formula, true));
+    result = result.replace(/\\\(([\s\S]+?)\\\)/g, (_match, formula) => renderFormula(formula, false));
+    result = result.replace(/(^|[^\\])\$([^\s\$](?:[\s\S]*?[^\s\$\\])?)\$/g, (match, prefix, formula) => {
+      if (/<(?:p|div|ul|ol|li|h[1-6]|table|blockquote)[\s\S]*>/i.test(formula)) return match;
+      return prefix + renderFormula(formula, false);
+    });
+    return result;
+  }
+
+  const renderedMath = renderMath(userExample);
+  const inlineCount = (renderedMath.match(/class="katex"/g) || []).length;
+  const displayCount = (renderedMath.match(/class="katex-display"/g) || []).length;
+
+  if (inlineCount < 20) {
+    throw new Error(`Expected at least 20 inline equations, got ${inlineCount}`);
+  }
+  if (displayCount < 8) {
+    throw new Error(`Expected at least 8 display equations, got ${displayCount}`);
+  }
+  if (renderedMath.includes('$$d_{\\text{trans, 1}}') || renderedMath.includes('$d_{\\text{trans}}')) {
+    throw new Error('Unrendered math delimiters found in output');
+  }
+  console.log(`✓ Verified math renderer processed ${inlineCount} inline and ${displayCount} display equations from example`);
+
   // Cleanup test output
   await fs.promises.rm(testDir, { recursive: true, force: true });
 

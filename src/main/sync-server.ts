@@ -287,6 +287,16 @@ export class SyncServer extends EventEmitter {
   }
 
   private handleWsConnection(ws: WebSocket): void {
+    // Clean up any stale or backed-up connections
+    for (const existing of this.clients) {
+      if (existing.readyState !== WebSocket.OPEN || existing.bufferedAmount > 256 * 1024) {
+        try {
+          existing.terminate();
+        } catch (_) {}
+        this.clients.delete(existing);
+      }
+    }
+
     this.clients.add(ws);
     logger.info('SyncServer', `New tablet WebSocket client connected (total: ${this.clients.size})`);
     this.emit('client-count-changed', this.clients.size);
@@ -414,8 +424,8 @@ export class SyncServer extends EventEmitter {
     const raw = JSON.stringify(action);
     for (const client of this.clients) {
       if (client !== senderWs && client.readyState === WebSocket.OPEN) {
-        // If sending heavy image frame and client buffer is backed up, skip to prevent stalling
-        if (action.type === 'slide:frame' && client.bufferedAmount > 1024 * 1024) {
+        // If sending heavy image frame and client buffer is backed up, skip to prevent stalling and heap growth
+        if (action.type === 'slide:frame' && client.bufferedAmount > 0) {
           continue;
         }
         client.send(raw, (err) => {
@@ -467,13 +477,18 @@ export class SyncServer extends EventEmitter {
     }
   }
 
+  private frameBroadcastCount: number = 0;
+
   /**
    * Broadcast captured slide viewport frame to all tablet clients
    */
   public broadcastSlideFrame(data: string, slideIndex?: number): void {
     this.latestSlideFrame = data;
     const currentIndex = slideIndex ?? (this.latestState ? (this.latestState.currentIndex ?? 0) : 0);
-    logger.info('SyncServer', `Broadcasting slide:frame to ${this.clients.size} tablets (${data.length} chars, slide: ${currentIndex})`);
+    this.frameBroadcastCount++;
+    if (this.frameBroadcastCount % 50 === 1) {
+      logger.debug('SyncServer', `Broadcasting slide:frame to ${this.clients.size} tablets (${data.length} chars, slide: ${currentIndex}, frame #${this.frameBroadcastCount})`);
+    }
     this.broadcast({
       type: 'slide:frame',
       slideIndex: currentIndex,
