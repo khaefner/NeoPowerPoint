@@ -22,10 +22,27 @@ export interface PresenterAPI {
   launchTabletBrowser: () => Promise<{ success: boolean; error?: string }>;
   onAdbDevicesChanged: (callback: (devices: any[]) => void) => () => void;
   openExternalUrl: (url: string) => Promise<boolean>;
+  // Display Management (PowerPoint Parity)
+  swapDisplays: () => Promise<{ success: boolean; isSwapped: boolean }>;
+  duplicateSlideShow: () => Promise<void>;
+  endSlideShow: () => Promise<void>;
+  getDisplayStatus: () => Promise<{ hasMultipleDisplays: boolean; isMirrored: boolean; isSwapped: boolean; autoExtendEnabled: boolean }>;
+  setAutoExtend: (enabled: boolean) => Promise<{ success: boolean; autoExtendEnabled: boolean }>;
+  onDisplayStatusChanged: (callback: (status: any) => void) => () => void;
 }
 
 const api: PresenterAPI = {
   openExternalUrl: (url) => ipcRenderer.invoke('shell:open-external', url),
+  swapDisplays: () => ipcRenderer.invoke('presenter:swap-displays'),
+  duplicateSlideShow: () => ipcRenderer.invoke('presenter:duplicate-slideshow'),
+  endSlideShow: () => ipcRenderer.invoke('presenter:end-slideshow'),
+  getDisplayStatus: () => ipcRenderer.invoke('presenter:get-display-status'),
+  setAutoExtend: (enabled: boolean) => ipcRenderer.invoke('presenter:set-auto-extend', enabled),
+  onDisplayStatusChanged: (callback) => {
+    const handler = (_: any, status: any) => callback(status);
+    ipcRenderer.on('presenter:display-status-changed', handler);
+    return () => ipcRenderer.removeListener('presenter:display-status-changed', handler);
+  },
   onSyncState: (callback) => {
     const handler = (_: any, state: any) => callback(state);
     ipcRenderer.on('presenter:state-update', handler);

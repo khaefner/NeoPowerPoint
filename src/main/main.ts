@@ -12,6 +12,7 @@ import { SyncServer } from './sync-server';
 import { InkStore } from './ink-store';
 import { InkSyncAction, SlideScrollAction, SlideDomSyncAction, SlideInteractionAction } from '../types/ink';
 import { logger } from './logger';
+import { displayManager } from './display-manager';
 
 process.on('uncaughtException', (err) => {
   logger.error('MainProcess', 'Uncaught Exception', err);
@@ -330,36 +331,43 @@ function createMainWindow(): void {
   buildAppMenu();
 }
 
-function openPresenterWindow(): boolean {
+async function openPresenterWindow(): Promise<boolean> {
   if (presenterWindow && !presenterWindow.isDestroyed()) {
     presenterWindow.focus();
     return true;
   }
 
+  // Auto-extend mirrored displays if present (matches Microsoft PowerPoint behavior)
+  try {
+    await displayManager.ensureExtendedDisplays();
+  } catch (err) {
+    logger.warn('MainProcess', `Display auto-extend attempt encountered error: ${err}`);
+  }
+
   // Find displays
   const displays = screen.getAllDisplays();
   const primaryDisplay = screen.getPrimaryDisplay();
-  const secondaryDisplay = displays.find(d => d.id !== primaryDisplay.id);
+  const secondaryDisplay = displays.find(d => d.id !== primaryDisplay.id &&
+    (d.bounds.x !== primaryDisplay.bounds.x || d.bounds.y !== primaryDisplay.bounds.y));
 
-  // Automatically put audience presentation window into Fullscreen
+  const isSwapped = displayManager.getIsSwapped();
+  const audienceDisplay = secondaryDisplay ? (isSwapped ? primaryDisplay : secondaryDisplay) : primaryDisplay;
+  const presenterDisplay = secondaryDisplay ? (isSwapped ? secondaryDisplay : primaryDisplay) : primaryDisplay;
+
+  // Automatically put audience presentation window into Fullscreen on audienceDisplay
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (secondaryDisplay) {
-      // If external projector/secondary monitor is attached, place audience window there
-      mainWindow.setBounds(secondaryDisplay.bounds);
-      mainWindow.setFullScreen(true);
-    } else {
-      // On single monitor, audience window goes fullscreen presentation
-      mainWindow.setFullScreen(true);
-    }
+    mainWindow.setFullScreen(false);
+    mainWindow.setBounds(audienceDisplay.bounds);
+    mainWindow.setFullScreen(true);
     mainWindow.webContents.send('deck:set-presentation-mode', true);
   }
 
-  // Open Presenter View on the primary presenter monitor
+  // Open Presenter View on presenterDisplay
   presenterWindow = new BrowserWindow({
-    x: primaryDisplay.bounds.x + 40,
-    y: primaryDisplay.bounds.y + 40,
-    width: Math.min(1150, primaryDisplay.bounds.width - 80),
-    height: Math.min(780, primaryDisplay.bounds.height - 80),
+    x: presenterDisplay.bounds.x + (secondaryDisplay ? 40 : 30),
+    y: presenterDisplay.bounds.y + (secondaryDisplay ? 40 : 30),
+    width: Math.min(1150, presenterDisplay.bounds.width - (secondaryDisplay ? 80 : 60)),
+    height: Math.min(780, presenterDisplay.bounds.height - (secondaryDisplay ? 80 : 60)),
     minWidth: 700,
     minHeight: 500,
     title: 'NeoPowerPoint — Presenter View',
@@ -443,7 +451,7 @@ function openPresenterWindow(): boolean {
     updateCaptureStreamingState();
   });
 
-  presenterWindow.on('closed', () => {
+  presenterWindow.on('closed', async () => {
     presenterWindow = null;
     updateCaptureStreamingState();
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -452,6 +460,8 @@ function openPresenterWindow(): boolean {
       }
       mainWindow.webContents.send('deck:set-presentation-mode', false);
     }
+    // Restore display configuration if auto-extended (matches Microsoft PowerPoint)
+    await displayManager.restoreDisplayMode();
   });
 
   return true;
@@ -962,6 +972,48 @@ ipcMain.handle('presenter:close', async () => {
   if (presenterWindow && !presenterWindow.isDestroyed()) {
     presenterWindow.close();
   }
+});
+
+ipcMain.handle('presenter:swap-displays', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { success: false, isSwapped: false };
+  const isSwapped = displayManager.swapDisplays(mainWindow, presenterWindow);
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('presenter:display-status-changed', {
+      isSwapped,
+      hasMultipleDisplays: screen.getAllDisplays().length > 1
+    });
+  }
+  return { success: true, isSwapped };
+});
+
+ipcMain.handle('presenter:duplicate-slideshow', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  await displayManager.duplicateSlideShow(mainWindow, presenterWindow);
+});
+
+ipcMain.handle('presenter:end-slideshow', async () => {
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.close();
+  } else if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setFullScreen(false);
+    mainWindow.webContents.send('deck:set-presentation-mode', false);
+    await displayManager.restoreDisplayMode();
+  }
+});
+
+ipcMain.handle('presenter:get-display-status', async () => {
+  const state = await displayManager.detectDisplayState();
+  return {
+    hasMultipleDisplays: state.hasMultipleDisplays,
+    isMirrored: state.isMirrored,
+    isSwapped: displayManager.getIsSwapped(),
+    autoExtendEnabled: displayManager.isAutoExtendEnabled()
+  };
+});
+
+ipcMain.handle('presenter:set-auto-extend', async (_event, enabled: boolean) => {
+  displayManager.setAutoExtendEnabled(enabled);
+  return { success: true, autoExtendEnabled: displayManager.isAutoExtendEnabled() };
 });
 
 ipcMain.on('presenter:sync-state', (_, state) => {

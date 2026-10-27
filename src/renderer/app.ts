@@ -12,6 +12,7 @@ class PresentationApp {
   private currentIndex: number = 0;
   private isPresentationMode: boolean = false;
   private isEditMode: boolean = true;
+  private wasEditModeBeforePresentation: boolean = false;
   private currentScaleFactor: number = 1;
   private floatingControlsTimer: any = null;
   private currentAnimStep: number = 0;
@@ -58,6 +59,7 @@ class PresentationApp {
   private floatCounterEl = document.getElementById('float-counter')!;
   private floatPrevBtn = document.getElementById('float-prev')!;
   private floatNextBtn = document.getElementById('float-next')!;
+  private floatSwapBtn = document.getElementById('float-swap');
   private floatExitBtn = document.getElementById('float-exit')!;
 
   // Modals & Menus
@@ -287,6 +289,7 @@ class PresentationApp {
     // Floating Controls
     this.floatPrevBtn.addEventListener('click', () => this.prevSlide());
     this.floatNextBtn.addEventListener('click', () => this.nextSlide());
+    this.floatSwapBtn?.addEventListener('click', () => window.electronAPI.swapDisplays?.());
     this.floatExitBtn.addEventListener('click', () => this.exitPresentationMode());
 
     // Mouse movement in presentation mode for floating controls
@@ -479,10 +482,16 @@ class PresentationApp {
       document.body.classList.toggle('mode-presentation', enabled);
       this.floatingControlsEl.classList.toggle('hidden', !enabled);
       if (enabled) {
+        if (this.isEditMode) {
+          this.wasEditModeBeforePresentation = true;
+          this.isEditMode = false;
+        }
         this.disableEditModeFeatures();
         this.editorToolbarEl?.classList.add('hidden');
       } else {
-        if (this.isEditMode) {
+        if (this.wasEditModeBeforePresentation) {
+          this.wasEditModeBeforePresentation = false;
+          this.isEditMode = true;
           this.editorToolbarEl?.classList.remove('hidden');
           this.enableEditModeFeatures();
         }
@@ -768,7 +777,9 @@ class PresentationApp {
         }
         if ((e.ctrlKey || e.metaKey) && (e.key === 'e' || e.key === 'E')) {
           e.preventDefault();
-          this.toggleEditMode();
+          if (!this.isPresentationMode) {
+            this.toggleEditMode();
+          }
           return;
         }
         if (e.key === 'Escape') {
@@ -1071,7 +1082,9 @@ class PresentationApp {
   private handleKeyDown(e: KeyboardEvent): void {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'e' || e.key === 'E')) {
       e.preventDefault();
-      this.toggleEditMode();
+      if (!this.isPresentationMode) {
+        this.toggleEditMode();
+      }
       return;
     }
     if (this.isEditMode && (e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
@@ -1135,6 +1148,11 @@ class PresentationApp {
     } else if (e.key === 'p' || e.key === 'P') {
       e.preventDefault();
       window.electronAPI.openPresenterWindow();
+    } else if (e.key === 'x' || e.key === 'X') {
+      if (this.isPresentationMode) {
+        e.preventDefault();
+        window.electronAPI.swapDisplays?.();
+      }
     } else if (e.key === 'o' || e.key === 'O') {
       e.preventDefault();
       this.toggleOverview();
@@ -1591,9 +1609,15 @@ class PresentationApp {
         if (doc) {
           this.setupIframeKeyDownBridge(doc);
           this.setupIframeSyncBridge(activeFrame, doc);
-          if (this.isEditMode && !this.isPresentationMode) {
+          if (this.isPresentationMode) {
+            this.sanitizeSlideDocForPresentation(doc);
+          } else if (this.isEditMode) {
             this.enableEditModeFeatures();
-          } else if (fromPrev) {
+          } else {
+            this.sanitizeSlideDocForPresentation(doc);
+          }
+
+          if (fromPrev) {
             try {
               const win = activeFrame.contentWindow as any;
               if (win && typeof win.goToAnimStep === 'function') {
@@ -1687,9 +1711,15 @@ class PresentationApp {
       if (doc) {
         this.setupIframeKeyDownBridge(doc);
         this.setupIframeSyncBridge(incomingFrame, doc);
-        if (this.isEditMode && !this.isPresentationMode) {
+        if (this.isPresentationMode) {
+          this.sanitizeSlideDocForPresentation(doc);
+        } else if (this.isEditMode) {
           this.enableEditModeFeatures();
-        } else if (fromPrev) {
+        } else {
+          this.sanitizeSlideDocForPresentation(doc);
+        }
+
+        if (fromPrev) {
           try {
             const win = incomingFrame.contentWindow as any;
             if (win && typeof win.goToAnimStep === 'function') {
@@ -2537,10 +2567,16 @@ class PresentationApp {
     this.floatingControlsEl.classList.toggle('hidden', !this.isPresentationMode);
 
     if (this.isPresentationMode) {
+      if (this.isEditMode) {
+        this.wasEditModeBeforePresentation = true;
+        this.isEditMode = false;
+      }
       this.disableEditModeFeatures();
       this.editorToolbarEl?.classList.add('hidden');
     } else {
-      if (this.isEditMode) {
+      if (this.wasEditModeBeforePresentation) {
+        this.wasEditModeBeforePresentation = false;
+        this.isEditMode = true;
         this.editorToolbarEl?.classList.remove('hidden');
         this.enableEditModeFeatures();
       }
@@ -2557,10 +2593,16 @@ class PresentationApp {
     this.floatingControlsEl.classList.toggle('hidden', !isFs);
 
     if (this.isPresentationMode) {
+      if (this.isEditMode) {
+        this.wasEditModeBeforePresentation = true;
+        this.isEditMode = false;
+      }
       this.disableEditModeFeatures();
       this.editorToolbarEl?.classList.add('hidden');
     } else {
-      if (this.isEditMode) {
+      if (this.wasEditModeBeforePresentation) {
+        this.wasEditModeBeforePresentation = false;
+        this.isEditMode = true;
         this.editorToolbarEl?.classList.remove('hidden');
         this.enableEditModeFeatures();
       }
@@ -2574,8 +2616,11 @@ class PresentationApp {
     document.body.classList.remove('mode-presentation');
     this.floatingControlsEl.classList.add('hidden');
     window.electronAPI.setWindowedPresentation(false);
+    window.electronAPI.endSlideShow?.().catch(() => {});
 
-    if (this.isEditMode) {
+    if (this.wasEditModeBeforePresentation) {
+      this.wasEditModeBeforePresentation = false;
+      this.isEditMode = true;
       this.editorToolbarEl?.classList.remove('hidden');
       this.enableEditModeFeatures();
     }
@@ -2916,6 +2961,7 @@ class PresentationApp {
   }
 
   toggleEditMode(): void {
+    if (this.isPresentationMode) return;
     this.isEditMode = !this.isEditMode;
     console.log(`[NeoEditor] toggleEditMode -> isEditMode is now: ${this.isEditMode}`);
     const btnToggle = document.getElementById('btn-toggle-edit-mode');
@@ -2948,6 +2994,7 @@ class PresentationApp {
   }
 
   private enableEditModeFeatures(): void {
+    if (this.isPresentationMode) return;
     let doc: Document | null = null;
     try {
       doc = this.slideFrameEl.contentDocument;
@@ -2958,6 +3005,9 @@ class PresentationApp {
       console.warn(`[NeoEditor] enableEditModeFeatures: contentDocument is null!`);
       return;
     }
+
+    const presStyle = doc.getElementById('neo-presentation-non-editable-styles');
+    if (presStyle) presStyle.remove();
 
     console.log(`[NeoEditor] enableEditModeFeatures: Applying to document "${doc.title}"...`);
     doc.body?.classList.add('show-all-anims', 'edit-mode');
@@ -3061,14 +3111,17 @@ class PresentationApp {
     doc.addEventListener('mouseup', onSelectionOrFocus);
     doc.addEventListener('keyup', onSelectionOrFocus);
     doc.addEventListener('focusin', onSelectionOrFocus);
-    doc.addEventListener('click', (e) => {
+    const onOverlayClick = (e: MouseEvent) => {
+      if (!this.isEditMode || this.isPresentationMode) return;
       const target = e.target as HTMLElement;
       const editable = target.closest('.editor-editable-text, .editor-draggable, .tb, p, h1, h2, h3, h4, h5, h6, span, div') as HTMLElement;
       if (editable && editable !== doc.body && editable !== doc.documentElement) {
         this.currentActiveElement = editable;
         this.renderSelectionOverlay(editable);
       }
-    });
+    };
+    (doc as any)._onOverlayClick = onOverlayClick;
+    doc.addEventListener('click', onOverlayClick);
 
     // Inject temporary styles for outlines and drag/resize handles
     let styleEl = doc.getElementById('neo-editor-styles');
@@ -3133,7 +3186,10 @@ class PresentationApp {
 
   private renderSelectionOverlay(targetEl: HTMLElement): void {
     const doc = this.slideFrameEl.contentDocument;
-    if (!doc || !this.isEditMode) return;
+    if (!doc || !this.isEditMode || this.isPresentationMode) {
+      doc?.getElementById('neo-selection-overlay')?.remove();
+      return;
+    }
     if (targetEl === doc.body || targetEl === doc.documentElement) return;
 
     let overlay = doc.getElementById('neo-selection-overlay') as HTMLElement;
@@ -3290,50 +3346,111 @@ class PresentationApp {
     });
   }
 
-  private disableEditModeFeatures(): void {
-    console.log(`[NeoEditor] disableEditModeFeatures called.`);
-    const doc = this.slideFrameEl.contentDocument;
+  public sanitizeSlideDocForPresentation(doc: Document | null): void {
     if (!doc) return;
 
-    doc.body?.classList.remove('show-all-anims', 'edit-mode');
+    try {
+      doc.body?.classList.remove('show-all-anims', 'edit-mode');
 
-    const overlay = doc.getElementById('neo-selection-overlay');
-    if (overlay) overlay.remove();
+      const overlay = doc.getElementById('neo-selection-overlay');
+      if (overlay) overlay.remove();
+      doc.querySelectorAll('.neo-move-handle, .neo-resize-handle').forEach(h => h.remove());
 
-    if ((doc as any)._onEditClickCapture) {
-      doc.removeEventListener('click', (doc as any)._onEditClickCapture, true);
-      delete (doc as any)._onEditClickCapture;
-    }
-
-    if ((doc as any)._onSelectionOrFocus) {
-      doc.removeEventListener('selectionchange', (doc as any)._onSelectionOrFocus);
-      doc.removeEventListener('mouseup', (doc as any)._onSelectionOrFocus);
-      doc.removeEventListener('keyup', (doc as any)._onSelectionOrFocus);
-      doc.removeEventListener('focusin', (doc as any)._onSelectionOrFocus);
-      delete (doc as any)._onSelectionOrFocus;
-    }
-
-    doc.querySelectorAll('.editor-editable-text').forEach(el => {
-      (el as HTMLElement).removeAttribute('contenteditable');
-      (el as HTMLElement).classList.remove('editor-editable-text');
-    });
-
-    doc.querySelectorAll('.editor-draggable').forEach(el => {
-      const htmlEl = el as HTMLElement;
-      htmlEl.classList.remove('editor-draggable', 'editor-selected');
-      if ((htmlEl as any)._editorDragHandler) {
-        htmlEl.removeEventListener('mousedown', (htmlEl as any)._editorDragHandler);
-        delete (htmlEl as any)._editorDragHandler;
+      if ((doc as any)._onEditClickCapture) {
+        doc.removeEventListener('click', (doc as any)._onEditClickCapture, true);
+        delete (doc as any)._onEditClickCapture;
       }
-    });
 
-    const styleEl = doc.getElementById('neo-editor-styles');
-    if (styleEl) styleEl.remove();
+      if ((doc as any)._onSelectionOrFocus) {
+        doc.removeEventListener('selectionchange', (doc as any)._onSelectionOrFocus);
+        doc.removeEventListener('mouseup', (doc as any)._onSelectionOrFocus);
+        doc.removeEventListener('keyup', (doc as any)._onSelectionOrFocus);
+        doc.removeEventListener('focusin', (doc as any)._onSelectionOrFocus);
+        delete (doc as any)._onSelectionOrFocus;
+      }
+
+      if ((doc as any)._onOverlayClick) {
+        doc.removeEventListener('click', (doc as any)._onOverlayClick);
+        delete (doc as any)._onOverlayClick;
+      }
+
+      // Remove contenteditable from all elements
+      doc.querySelectorAll('[contenteditable]').forEach(el => {
+        (el as HTMLElement).removeAttribute('contenteditable');
+      });
+
+      // Remove editor-specific classes
+      doc.querySelectorAll('.editor-editable-text').forEach(el => {
+        (el as HTMLElement).classList.remove('editor-editable-text');
+      });
+
+      doc.querySelectorAll('.editor-draggable').forEach(el => {
+        const htmlEl = el as HTMLElement;
+        htmlEl.classList.remove('editor-draggable', 'editor-selected');
+        if ((htmlEl as any)._editorDragHandler) {
+          htmlEl.removeEventListener('mousedown', (htmlEl as any)._editorDragHandler);
+          delete (htmlEl as any)._editorDragHandler;
+        }
+      });
+
+      doc.querySelectorAll('.editor-selected').forEach(el => {
+        (el as HTMLElement).classList.remove('editor-selected');
+      });
+
+      // Remove editor injected styles
+      const styleEl = doc.getElementById('neo-editor-styles');
+      if (styleEl) styleEl.remove();
+
+      // Enforce presentation non-editable styling
+      let presStyle = doc.getElementById('neo-presentation-non-editable-styles') as HTMLStyleElement;
+      if (!presStyle) {
+        presStyle = doc.createElement('style');
+        presStyle.id = 'neo-presentation-non-editable-styles';
+        presStyle.textContent = `
+          [contenteditable] {
+            -webkit-user-modify: read-only !important;
+            caret-color: transparent !important;
+            outline: none !important;
+            cursor: default !important;
+          }
+          .editor-editable-text, .editor-draggable, .editor-selected {
+            outline: none !important;
+            cursor: inherit !important;
+          }
+          #neo-selection-overlay, .neo-move-handle, .neo-resize-handle {
+            display: none !important;
+          }
+        `;
+        doc.head?.appendChild(presStyle);
+      }
+
+      // If active element is an editable or input, blur it
+      const activeEl = doc.activeElement as HTMLElement;
+      if (activeEl && (activeEl.isContentEditable || activeEl.classList?.contains('editor-editable-text') || activeEl.classList?.contains('editor-draggable'))) {
+        activeEl.blur();
+      }
+    } catch (e) {
+      console.warn('[NeoEditor] sanitizeSlideDocForPresentation error:', e);
+    }
+  }
+
+  private disableEditModeFeatures(): void {
+    console.log(`[NeoEditor] disableEditModeFeatures called.`);
+    this.currentActiveElement = null;
+    this.currentSelectedRange = null;
+
+    if (this.slideFrameA?.contentDocument) {
+      this.sanitizeSlideDocForPresentation(this.slideFrameA.contentDocument);
+    }
+    if (this.slideFrameB?.contentDocument) {
+      this.sanitizeSlideDocForPresentation(this.slideFrameB.contentDocument);
+    }
   }
 
   // --- WYSIWYG Editor Actions ---
 
   addNewTextBox(): void {
+    if (this.isPresentationMode) return;
     if (!this.isEditMode) {
       this.toggleEditMode();
     }
@@ -3381,6 +3498,7 @@ class PresentationApp {
   }
 
   setFontSize(size: string): void {
+    if (this.isPresentationMode) return;
     const doc = this.slideFrameEl.contentDocument;
     if (!doc) return;
 
@@ -3403,6 +3521,7 @@ class PresentationApp {
   }
 
   adjustFontSize(direction: number): void {
+    if (this.isPresentationMode) return;
     const doc = this.slideFrameEl.contentDocument;
     if (!doc) return;
 
@@ -3422,6 +3541,7 @@ class PresentationApp {
   }
 
   setFontColor(color: string): void {
+    if (this.isPresentationMode) return;
     const doc = this.slideFrameEl.contentDocument;
     if (!doc) return;
 
@@ -3443,6 +3563,7 @@ class PresentationApp {
   }
 
   formatText(command: 'bold' | 'italic' | 'underline'): void {
+    if (this.isPresentationMode) return;
     const doc = this.slideFrameEl.contentDocument;
     if (!doc) return;
 
@@ -3458,6 +3579,7 @@ class PresentationApp {
   }
 
   deleteSelectedElement(): void {
+    if (this.isPresentationMode) return;
     const doc = this.slideFrameEl.contentDocument;
     if (!doc) return;
 
@@ -3468,6 +3590,7 @@ class PresentationApp {
   }
 
   private async saveSlideHtml(): Promise<void> {
+    if (this.isPresentationMode) return;
     if (!this.manifest || !this.manifest.slides[this.currentIndex]) return;
     console.log(`[NeoEditor] saveSlideHtml: saving slide index ${this.currentIndex}...`);
     const doc = this.slideFrameEl.contentDocument;

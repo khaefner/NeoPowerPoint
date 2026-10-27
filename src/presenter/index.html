@@ -9,10 +9,41 @@
 </head>
 <body>
   <div class="presenter-container">
-    <!-- Top Bar: Clock, Timer, Deck Title -->
+    <!-- Top Bar: Clock, Timer, Deck Title, Display Settings -->
     <header class="presenter-header">
       <div class="header-left">
         <h2 id="p-deck-title">Presentation Title</h2>
+        <div class="display-settings-container">
+          <button id="btn-display-settings" class="btn-header" title="Display Settings (Swap displays, Duplicate presentation)">
+            🖥️ Display Settings ▾
+          </button>
+          <div id="display-settings-menu" class="display-settings-dropdown hidden">
+            <button id="btn-swap-displays" class="dropdown-item" title="Swap Presenter View and Audience Slide Show (Shortcut: X)">
+              <span class="dropdown-icon">🔄</span>
+              <div class="dropdown-text">
+                <span class="dropdown-label">Swap Presenter View and Slide Show</span>
+                <span class="dropdown-hint">Shortcut: X</span>
+              </div>
+            </button>
+            <button id="btn-duplicate-slideshow" class="dropdown-item" title="Duplicate clean presentation full-screen on all displays">
+              <span class="dropdown-icon">🖥️</span>
+              <div class="dropdown-text">
+                <span class="dropdown-label">Duplicate Slide Show</span>
+                <span class="dropdown-hint">Full-screen slides across all monitors</span>
+              </div>
+            </button>
+            <button id="btn-auto-extend-toggle" class="dropdown-item" title="Automatically un-mirror external display when presenting">
+              <span class="dropdown-icon" id="auto-extend-icon">✓</span>
+              <div class="dropdown-text">
+                <span class="dropdown-label">Auto-Extend Mirrored Displays</span>
+                <span class="dropdown-hint">Matches Microsoft PowerPoint</span>
+              </div>
+            </button>
+          </div>
+          <button id="btn-end-slideshow" class="btn-header btn-header-danger" title="End Slide Show and exit presenter view (Shortcut: Esc)">
+            ⏹ End Slide Show
+          </button>
+        </div>
       </div>
 
       <div class="header-center">

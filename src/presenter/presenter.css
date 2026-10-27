@@ -45,14 +45,122 @@ body, html {
   flex-shrink: 0;
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .header-left h2 {
   font-size: 1.15rem;
   font-weight: 600;
   color: var(--text-primary);
-  max-width: 320px;
+  max-width: 260px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.display-settings-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.btn-header {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.btn-header:hover {
+  background: var(--border);
+  border-color: #475569;
+}
+
+.btn-header-danger {
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.btn-header-danger:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
+.display-settings-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  min-width: 300px;
+  z-index: 1000;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.display-settings-dropdown.hidden {
+  display: none;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  width: 100%;
+}
+
+.dropdown-item:hover {
+  background: #1e293b;
+}
+
+.dropdown-icon {
+  font-size: 1.1rem;
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.dropdown-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #f8fafc;
+}
+
+.dropdown-hint {
+  font-size: 0.72rem;
+  color: #94a3b8;
 }
 
 .header-center {
@@ -276,6 +384,10 @@ body, html {
   border: none;
   background: #fff;
   z-index: 1;
+}
+
+#next-frame {
+  pointer-events: none;
 }
 
 .preview-mirror {

@@ -32,6 +32,8 @@ export interface ElectronAPI {
   setWindowedPresentation: (enabled: boolean) => Promise<void>;
   openPresenterWindow: () => Promise<boolean>;
   closePresenterWindow: () => Promise<void>;
+  swapDisplays: () => Promise<{ success: boolean; isSwapped: boolean }>;
+  endSlideShow: () => Promise<void>;
   syncStateToPresenter: (state: any) => void;
   requestSlideCapture: (rect?: { x: number; y: number; width: number; height: number }) => void;
   updateSlideRect: (rect: { x: number; y: number; width: number; height: number }) => void;
@@ -90,6 +92,8 @@ const api: ElectronAPI = {
   setWindowedPresentation: (enabled) => ipcRenderer.invoke('window:set-windowed', enabled),
   openPresenterWindow: () => ipcRenderer.invoke('presenter:open'),
   closePresenterWindow: () => ipcRenderer.invoke('presenter:close'),
+  swapDisplays: () => ipcRenderer.invoke('presenter:swap-displays'),
+  endSlideShow: () => ipcRenderer.invoke('presenter:end-slideshow'),
   syncStateToPresenter: (state) => ipcRenderer.send('presenter:sync-state', state),
   requestSlideCapture: (rect) => ipcRenderer.send('slide:request-capture', rect),
   updateSlideRect: (rect) => ipcRenderer.send('slide:update-rect', rect),

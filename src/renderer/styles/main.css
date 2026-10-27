@@ -826,7 +826,11 @@ body, html {
 
 /* Presentation Modes: Windowed & Fullscreen */
 body.mode-presentation .toolbar,
-body.mode-presentation .sidebar {
+body.mode-presentation .sidebar,
+body.mode-presentation #neo-selection-overlay,
+body.mode-presentation .neo-move-handle,
+body.mode-presentation .neo-resize-handle,
+body.mode-presentation #editor-toolbar {
   display: none !important;
 }
 

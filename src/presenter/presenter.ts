@@ -21,6 +21,12 @@ declare global {
       getAdbStatus: () => Promise<any>;
       launchTabletBrowser: () => Promise<{ success: boolean; error?: string }>;
       onAdbDevicesChanged: (callback: (devices: any[]) => void) => () => void;
+      swapDisplays: () => Promise<{ success: boolean; isSwapped: boolean }>;
+      duplicateSlideShow: () => Promise<void>;
+      endSlideShow: () => Promise<void>;
+      getDisplayStatus: () => Promise<{ hasMultipleDisplays: boolean; isMirrored: boolean; isSwapped: boolean; autoExtendEnabled: boolean }>;
+      setAutoExtend: (enabled: boolean) => Promise<{ success: boolean; autoExtendEnabled: boolean }>;
+      onDisplayStatusChanged?: (callback: (status: any) => void) => () => void;
     };
   }
 }
@@ -40,6 +46,61 @@ const timerDisplayEl = document.getElementById('timer-display')!;
 const clockDisplayEl = document.getElementById('clock-display')!;
 const btnTimerPause = document.getElementById('btn-timer-pause')!;
 const btnTimerReset = document.getElementById('btn-timer-reset')!;
+
+// Display Settings & End Show Controls (PowerPoint Parity)
+const btnDisplaySettings = document.getElementById('btn-display-settings');
+const displaySettingsMenu = document.getElementById('display-settings-menu');
+const btnSwapDisplays = document.getElementById('btn-swap-displays');
+const btnDuplicateSlideshow = document.getElementById('btn-duplicate-slideshow');
+const btnAutoExtendToggle = document.getElementById('btn-auto-extend-toggle');
+const autoExtendIcon = document.getElementById('auto-extend-icon');
+const btnEndSlideshow = document.getElementById('btn-end-slideshow');
+let isAutoExtendActive = true;
+
+if (btnDisplaySettings && displaySettingsMenu) {
+  btnDisplaySettings.addEventListener('click', (e) => {
+    e.stopPropagation();
+    displaySettingsMenu.classList.toggle('hidden');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!displaySettingsMenu.contains(e.target as Node)) {
+      displaySettingsMenu.classList.add('hidden');
+    }
+  });
+
+  btnSwapDisplays?.addEventListener('click', () => {
+    displaySettingsMenu.classList.add('hidden');
+    window.presenterAPI.swapDisplays().catch(() => {});
+  });
+
+  btnDuplicateSlideshow?.addEventListener('click', () => {
+    displaySettingsMenu.classList.add('hidden');
+    window.presenterAPI.duplicateSlideShow().catch(() => {});
+  });
+
+  btnAutoExtendToggle?.addEventListener('click', async () => {
+    isAutoExtendActive = !isAutoExtendActive;
+    if (autoExtendIcon) {
+      autoExtendIcon.textContent = isAutoExtendActive ? '✓' : '';
+    }
+    await window.presenterAPI.setAutoExtend(isAutoExtendActive).catch(() => {});
+  });
+
+  btnEndSlideshow?.addEventListener('click', () => {
+    window.presenterAPI.endSlideShow().catch(() => {});
+  });
+
+  // Query initial display configuration
+  window.presenterAPI.getDisplayStatus?.().then((status) => {
+    if (status) {
+      isAutoExtendActive = status.autoExtendEnabled !== false;
+      if (autoExtendIcon) {
+        autoExtendIcon.textContent = isAutoExtendActive ? '✓' : '';
+      }
+    }
+  }).catch(() => {});
+}
 
 const currentSlideNameEl = document.getElementById('current-slide-name')!;
 const currentViewportEl = document.getElementById('current-viewport')!;
@@ -260,6 +321,7 @@ function renderState(state: any) {
       currentFrameEl.onload = () => {
         const doc = currentFrameEl.contentDocument;
         if (doc) {
+          sanitizeSlideDocForPresentation(doc);
           setupPresenterInteractionBridge(currentFrameEl, doc);
         }
         try {
@@ -275,6 +337,7 @@ function renderState(state: any) {
     } else {
       const doc = currentFrameEl.contentDocument;
       if (doc) {
+        sanitizeSlideDocForPresentation(doc);
         setupPresenterInteractionBridge(currentFrameEl, doc);
       }
       try {
@@ -302,7 +365,11 @@ function renderState(state: any) {
       nextFrameEl.src = nextUrl;
       nextFrameEl.onload = () => {
         try {
-          nextFrameEl.contentDocument?.body.classList.add('show-all-anims');
+          const doc = nextFrameEl.contentDocument;
+          if (doc) {
+            sanitizeSlideDocForPresentation(doc);
+            doc.body?.classList.add('show-all-anims');
+          }
         } catch (_) {}
       };
     }
@@ -478,10 +545,92 @@ function getElementSelector(el: HTMLElement, rootDoc: Document): string {
   return path.join(' > ') || 'body';
 }
 
+function sanitizeSlideDocForPresentation(doc: Document | null): void {
+  if (!doc) return;
+  try {
+    doc.body?.classList.remove('show-all-anims', 'edit-mode');
+
+    const overlay = doc.getElementById('neo-selection-overlay');
+    if (overlay) overlay.remove();
+    doc.querySelectorAll('.neo-move-handle, .neo-resize-handle').forEach(h => h.remove());
+
+    if ((doc as any)._onEditClickCapture) {
+      doc.removeEventListener('click', (doc as any)._onEditClickCapture, true);
+      delete (doc as any)._onEditClickCapture;
+    }
+
+    if ((doc as any)._onSelectionOrFocus) {
+      doc.removeEventListener('selectionchange', (doc as any)._onSelectionOrFocus);
+      doc.removeEventListener('mouseup', (doc as any)._onSelectionOrFocus);
+      doc.removeEventListener('keyup', (doc as any)._onSelectionOrFocus);
+      doc.removeEventListener('focusin', (doc as any)._onSelectionOrFocus);
+      delete (doc as any)._onSelectionOrFocus;
+    }
+
+    if ((doc as any)._onOverlayClick) {
+      doc.removeEventListener('click', (doc as any)._onOverlayClick);
+      delete (doc as any)._onOverlayClick;
+    }
+
+    // Strip contenteditable from all elements
+    doc.querySelectorAll('[contenteditable]').forEach(el => {
+      (el as HTMLElement).removeAttribute('contenteditable');
+    });
+
+    // Strip editor classes
+    doc.querySelectorAll('.editor-editable-text').forEach(el => {
+      (el as HTMLElement).classList.remove('editor-editable-text');
+    });
+
+    doc.querySelectorAll('.editor-draggable').forEach(el => {
+      (el as HTMLElement).classList.remove('editor-draggable', 'editor-selected');
+    });
+
+    doc.querySelectorAll('.editor-selected').forEach(el => {
+      (el as HTMLElement).classList.remove('editor-selected');
+    });
+
+    // Strip editor styles
+    const styleEl = doc.getElementById('neo-editor-styles');
+    if (styleEl) styleEl.remove();
+
+    // Inject presentation non-editable style
+    let presStyle = doc.getElementById('neo-presentation-non-editable-styles') as HTMLStyleElement;
+    if (!presStyle) {
+      presStyle = doc.createElement('style');
+      presStyle.id = 'neo-presentation-non-editable-styles';
+      presStyle.textContent = `
+        [contenteditable] {
+          -webkit-user-modify: read-only !important;
+          caret-color: transparent !important;
+          outline: none !important;
+          cursor: default !important;
+        }
+        .editor-editable-text, .editor-draggable, .editor-selected {
+          outline: none !important;
+          cursor: inherit !important;
+        }
+        #neo-selection-overlay, .neo-move-handle, .neo-resize-handle {
+          display: none !important;
+        }
+      `;
+      doc.head?.appendChild(presStyle);
+    }
+
+    // Blur active element if it was an editable or input element
+    const activeEl = doc.activeElement as HTMLElement;
+    if (activeEl && (activeEl.isContentEditable || activeEl.classList?.contains('editor-editable-text') || activeEl.classList?.contains('editor-draggable'))) {
+      activeEl.blur();
+    }
+  } catch (e) {
+    console.warn('[Presenter] sanitizeSlideDocForPresentation error:', e);
+  }
+}
+
 function setupPresenterKeyDownBridge(iframeDoc: Document): void {
   iframeDoc.addEventListener('keydown', (e: KeyboardEvent) => {
     const activeEl = iframeDoc.activeElement as HTMLElement;
-    const isEditing = activeEl && (activeEl.isContentEditable || activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+    const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
 
     if (isEditing) {
       if (e.key === 'Escape') activeEl.blur();
@@ -850,5 +999,34 @@ window.addEventListener('message', (event) => {
       actionType: 'step',
       step: event.data.currentStep
     });
+  }
+});
+
+// Presenter View Keyboard Shortcuts (matches PowerPoint & Keynote)
+window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable) {
+    return;
+  }
+
+  if (e.key === 'x' || e.key === 'X') {
+    // Swap Presenter View and Slide Show
+    e.preventDefault();
+    window.presenterAPI.swapDisplays().catch(() => {});
+  } else if (e.key === 'Escape') {
+    // End Slide Show
+    e.preventDefault();
+    window.presenterAPI.endSlideShow().catch(() => {});
+  } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+    e.preventDefault();
+    window.presenterAPI.nextSlide();
+  } else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'Backspace') {
+    e.preventDefault();
+    window.presenterAPI.prevSlide();
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    window.presenterAPI.navigateSlide(0);
+  } else if (e.key === 'End' && currentState?.manifest?.slides) {
+    e.preventDefault();
+    window.presenterAPI.navigateSlide(currentState.manifest.slides.length - 1);
   }
 });
