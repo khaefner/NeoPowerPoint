@@ -12,9 +12,6 @@ async function testSlideEditor() {
   const htmlPath = path.join(rootDir, 'dist/renderer/index.html');
   const htmlContent = await fs.promises.readFile(htmlPath, 'utf-8');
 
-  if (!htmlContent.includes('id="btn-toggle-edit-mode"')) {
-    throw new Error('Missing btn-toggle-edit-mode in index.html');
-  }
   if (!htmlContent.includes('id="btn-save-slide"')) {
     throw new Error('Missing btn-save-slide in index.html');
   }

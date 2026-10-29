@@ -14,7 +14,8 @@
       "path": "slides/01-welcome/index.html",
       "notes": "<ul><li>Introduce the presentation. Mention that every slide is an isolated, 100% standard web page running real JavaScript, CSS animations, and Canvas/WebGL.</li></ul><br><br>",
       "durationSec": 60,
-      "transition": "fade"
+      "transition": "fade",
+      "notesPath": "slides/01-welcome/notes.html"
     },
     {
       "id": "slide-2",
@@ -22,14 +23,16 @@
       "path": "slides/02-data-visualizer/index.html",
       "notes": "Demonstrate the interactive chart. Click the buttons to switch metrics and observe real-time dynamic re-rendering with smooth animation.",
       "durationSec": 90,
-      "transition": "fade"
+      "transition": "fade",
+      "notesPath": "slides/02-data-visualizer/notes.html"
     },
     {
       "id": "slide-1791642959777",
       "title": "Interactive Simulation",
       "path": "slides/1791642959772-interactive-simulation/index.html",
       "notes": "Embedded interactive webpage: https://gaia.cs.umass.edu/kurose_ross/interactive/end-end-throughput-simple.php",
-      "transition": "fade"
+      "transition": "fade",
+      "notesPath": "slides/1791642959772-interactive-simulation/notes.html"
     },
     {
       "id": "slide-3",
@@ -37,7 +40,8 @@
       "path": "slides/03-particle-physics/index.html",
       "notes": "Show off the high performance canvas simulation. Hover and drag your mouse to interact with the gravitational particle field.",
       "durationSec": 90,
-      "transition": "fade"
+      "transition": "fade",
+      "notesPath": "slides/03-particle-physics/notes.html"
     },
     {
       "id": "slide-4",
@@ -45,7 +49,8 @@
       "path": "slides/04-algorithm-visualizer/index.html",
       "notes": "Run the algorithm visualizer by clicking Start or Step. Slides can contain fully functional educational tools, demos, and simulations.",
       "durationSec": 120,
-      "transition": "fade"
+      "transition": "fade",
+      "notesPath": "slides/04-algorithm-visualizer/notes.html"
     }
   ]
 }

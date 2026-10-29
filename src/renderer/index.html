@@ -12,8 +12,8 @@
     <!-- Top Navigation & Toolbar -->
     <header id="top-toolbar" class="toolbar">
       <div class="toolbar-left">
-        <button id="btn-toggle-sidebar" class="btn-icon" title="Toggle Slide List (S)">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+        <button id="btn-toggle-sidebar" class="toolbar-btn btn-icon-only" title="Toggle Slide List (S)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
         </button>
         <div class="deck-info">
           <span id="deck-title" class="deck-title">No Presentation Open</span>
@@ -24,62 +24,57 @@
       </div>
 
       <div class="toolbar-center">
-        <button id="btn-prev-slide" class="btn-icon" title="Previous Slide (Left Arrow)">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        <button id="btn-prev-slide" class="toolbar-btn btn-nav-btn" title="Previous Slide (Left Arrow)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         <div class="slide-counter-wrapper">
           <span id="slide-counter">0 / 0</span>
         </div>
-        <button id="btn-next-slide" class="btn-icon" title="Next Slide (Right Arrow / Space)">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        <button id="btn-next-slide" class="toolbar-btn btn-nav-btn" title="Next Slide (Right Arrow / Space)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
         </button>
       </div>
 
       <div class="toolbar-right">
-        <button id="btn-save-slide" class="btn btn-primary" title="Save Slide Changes (Ctrl+S)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-          Save Slide
+        <button id="btn-save-slide" class="toolbar-btn btn-save" title="Save Slide Changes (Ctrl+S)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          <span class="btn-label-text">Save</span>
         </button>
 
-        <button id="btn-toggle-edit-mode" class="btn btn-secondary" title="Toggle Interactive Script Test Mode (Ctrl+E)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          <span id="label-toggle-edit">Test Scripts</span>
+        <button id="btn-ai-designer" class="toolbar-btn btn-ai" title="Design or Restyle Slide with AI (Ctrl+J)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+          <span class="btn-label-text"><span class="ai-text-gradient">✨ AI Design</span></span>
         </button>
 
-        <button id="btn-ai-designer" class="btn btn-secondary" title="Design or Restyle Slide with AI (Ctrl+J)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-          <span style="background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 700;">✨ AI Design</span>
+        <button id="btn-overview-grid" class="toolbar-btn" title="Slide Sorter (O)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span class="btn-label-text">Slide Sorter</span>
         </button>
 
-        <button id="btn-overview-grid" class="btn btn-secondary" title="Slide Sorter (O)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-          Slide Sorter
+        <button id="btn-windowed-mode" class="toolbar-btn" title="Windowed Presentation Mode (W) — Fills window cleanly for Zoom/Teams">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+          <span class="btn-label-text">Windowed</span>
         </button>
 
-        <button id="btn-windowed-mode" class="btn btn-primary" title="Windowed Presentation Mode (W) — Fills window cleanly for Zoom/Teams">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
-          Windowed Present
+        <button id="btn-fullscreen-mode" class="toolbar-btn" title="Fullscreen Presentation (F11 / F)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+          <span class="btn-label-text">Fullscreen</span>
         </button>
 
-        <button id="btn-fullscreen-mode" class="btn btn-primary" title="Fullscreen Presentation (F11 / F)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-          Fullscreen
-        </button>
-
-        <button id="btn-presenter-mode" class="btn btn-secondary" title="Dual-Screen Presenter View with Notes (P)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><path d="M7 8h10M7 12h5"/></svg>
-          Presenter View
+        <button id="btn-presenter-mode" class="toolbar-btn" title="Dual-Screen Presenter View with Notes (P)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><path d="M7 8h10M7 12h5"/></svg>
+          <span class="btn-label-text">Presenter</span>
         </button>
 
         <div class="adb-pill" id="main-adb-pill" title="Android Boox Tablet Status">
           <span class="adb-dot disconnected" id="main-adb-dot"></span>
           <span class="adb-label" id="main-adb-label">Boox: Disconnected</span>
-          <button id="btn-main-adb-launch" class="btn-micro adb-launch-btn" title="Launch companion inking view on connected tablet" disabled>Open on Boox</button>
+          <button id="btn-main-adb-launch" class="btn-micro adb-launch-btn" title="Launch companion inking view on connected tablet" disabled>Open</button>
         </div>
 
         <div class="dropdown">
-          <button id="btn-menu-more" class="btn-icon" title="Deck & File Menu">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+          <button id="btn-menu-more" class="toolbar-btn btn-menu-btn" title="Deck & File Menu">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
           </button>
           <div id="dropdown-menu" class="dropdown-content hidden">
             <button id="menu-open-folder">📂 Open Folder...</button>
