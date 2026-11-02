@@ -70,6 +70,12 @@ class PresentationApp {
   private overviewCountBadgeEl = document.getElementById('overview-count-badge');
   private editorToolbarEl = document.getElementById('editor-toolbar')!;
   private sorterContextMenuEl = document.getElementById('sorter-context-menu')!;
+  private slideObjectContextMenuEl = document.getElementById('slide-object-context-menu');
+  private newSlideModalEl = document.getElementById('new-slide-modal');
+
+  // New Slide Template Selection State
+  private selectedTemplateType: 'from-deck' | 'blank' | 'title' | 'content' | 'two-column' | 'stat' | string = 'from-deck';
+  private selectedTemplateSourceIndex: number = 0;
 
   // WYSIWYG Editor Selection State
   private currentActiveElement: HTMLElement | null = null;
@@ -101,6 +107,7 @@ class PresentationApp {
 
   private setupEventListeners(): void {
     // Toolbar buttons
+    document.getElementById('btn-add-slide-toolbar')?.addEventListener('click', () => this.openNewSlideModal());
     document.getElementById('btn-prev-slide')!.addEventListener('click', () => this.prevSlide());
     document.getElementById('btn-next-slide')!.addEventListener('click', () => this.nextSlide());
     document.getElementById('btn-toggle-sidebar')!.addEventListener('click', () => this.toggleSidebar());
@@ -150,7 +157,7 @@ class PresentationApp {
     document.getElementById('menu-import-pptx')?.addEventListener('click', () => this.importPptx());
     document.getElementById('menu-export-package')!.addEventListener('click', () => this.exportPackage());
     document.getElementById('menu-new-deck')!.addEventListener('click', () => this.newDeck());
-    document.getElementById('menu-new-slide')!.addEventListener('click', () => this.promptNewSlide());
+    document.getElementById('menu-new-slide')!.addEventListener('click', () => this.openNewSlideModal());
     document.getElementById('menu-new-web-slide')?.addEventListener('click', () => this.openWebSlideModal());
     document.getElementById('menu-toggle-edit')?.addEventListener('click', () => this.toggleEditMode());
     document.getElementById('menu-save-slide')?.addEventListener('click', () => this.saveSlideHtml());
@@ -171,7 +178,7 @@ class PresentationApp {
     document.getElementById('btn-welcome-new')!.addEventListener('click', () => this.newDeck());
 
     // Sidebar & Notes
-    document.getElementById('btn-sidebar-add-slide')!.addEventListener('click', () => this.promptNewSlide());
+    document.getElementById('btn-sidebar-add-slide')!.addEventListener('click', () => this.openNewSlideModal());
     document.getElementById('btn-sidebar-add-web-slide')?.addEventListener('click', () => this.openWebSlideModal());
     document.getElementById('btn-save-notes')!.addEventListener('click', () => this.saveNotes());
     document.getElementById('btn-expand-notes')?.addEventListener('click', () => this.toggleNotesModal(true));
@@ -187,6 +194,19 @@ class PresentationApp {
     document.getElementById('btn-close-web-modal')?.addEventListener('click', () => this.closeWebSlideModal());
     document.getElementById('btn-cancel-web-modal')?.addEventListener('click', () => this.closeWebSlideModal());
     document.getElementById('btn-confirm-web-modal')?.addEventListener('click', () => this.submitWebSlideModal());
+
+    // New Slide Template Modal Actions
+    document.getElementById('btn-close-new-slide-modal')?.addEventListener('click', () => this.closeNewSlideModal());
+    document.getElementById('btn-cancel-new-slide-modal')?.addEventListener('click', () => this.closeNewSlideModal());
+    document.getElementById('btn-confirm-new-slide-modal')?.addEventListener('click', () => this.submitNewSlideModal());
+    document.getElementById('tab-template-deck')?.addEventListener('click', () => this.switchNewSlideTab('deck'));
+    document.getElementById('tab-template-standard')?.addEventListener('click', () => this.switchNewSlideTab('standard'));
+
+    // Slide Object Context Menu Actions
+    document.getElementById('ctx-delete-object')?.addEventListener('click', () => this.deleteCurrentObject());
+    document.getElementById('ctx-duplicate-object')?.addEventListener('click', () => this.duplicateCurrentObject());
+    document.getElementById('ctx-bring-front')?.addEventListener('click', () => this.bringCurrentObjectToFront());
+    document.getElementById('ctx-send-back')?.addEventListener('click', () => this.sendCurrentObjectToBack());
 
     // Error & Diagnostics Modal
     document.getElementById('btn-close-error-modal')?.addEventListener('click', () => this.hideErrorModal());
@@ -276,6 +296,11 @@ class PresentationApp {
           this.hideSorterContextMenu();
         }
       }
+      if (this.slideObjectContextMenuEl && !this.slideObjectContextMenuEl.classList.contains('hidden')) {
+        if (!this.slideObjectContextMenuEl.contains(e.target as Node)) {
+          this.hideObjectContextMenu();
+        }
+      }
     });
 
     window.addEventListener('contextmenu', (e) => {
@@ -283,6 +308,9 @@ class PresentationApp {
       const target = e.target as HTMLElement;
       if (!target.closest('.overview-card') && !target.closest('.slide-item') && !target.closest('.sorter-context-menu')) {
         this.hideSorterContextMenu();
+      }
+      if (!target.closest('#slide-object-context-menu')) {
+        this.hideObjectContextMenu();
       }
     });
 
@@ -453,6 +481,10 @@ class PresentationApp {
 
     window.electronAPI.onReloadSlideEvent(() => {
       this.reloadCurrentSlide();
+    });
+
+    window.electronAPI.onNewSlideMenuEvent?.(() => {
+      this.openNewSlideModal();
     });
 
     window.electronAPI.onDeckLoadedEvent?.((res) => {
@@ -1080,6 +1112,11 @@ class PresentationApp {
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'm' || e.key === 'M')) {
+      e.preventDefault();
+      this.openNewSlideModal();
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'e' || e.key === 'E')) {
       e.preventDefault();
       if (!this.isPresentationMode) {
@@ -1091,6 +1128,15 @@ class PresentationApp {
       e.preventDefault();
       this.saveSlideHtml();
       return;
+    }
+
+    // Delete selected element with Delete or Backspace if not typing in text field
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (this.currentActiveElement && !this.isPresentationMode) {
+        e.preventDefault();
+        this.deleteCurrentObject();
+        return;
+      }
     }
 
     // Ignore navigation shortcuts when editing text notes or inputs
@@ -1166,7 +1212,11 @@ class PresentationApp {
       e.preventDefault();
       this.toggleShortcuts();
     } else if (e.key === 'Escape') {
-      if (this.sorterContextMenuEl && !this.sorterContextMenuEl.classList.contains('hidden')) {
+      if (this.slideObjectContextMenuEl && !this.slideObjectContextMenuEl.classList.contains('hidden')) {
+        this.hideObjectContextMenu();
+      } else if (this.newSlideModalEl && !this.newSlideModalEl.classList.contains('hidden')) {
+        this.closeNewSlideModal();
+      } else if (this.sorterContextMenuEl && !this.sorterContextMenuEl.classList.contains('hidden')) {
         this.hideSorterContextMenu();
       } else if (!this.notesModalEl.classList.contains('hidden')) {
         this.toggleNotesModal(false);
@@ -1609,6 +1659,7 @@ class PresentationApp {
         if (doc) {
           this.setupIframeKeyDownBridge(doc);
           this.setupIframeSyncBridge(activeFrame, doc);
+          this.setupIframeContextMenu(doc);
           if (this.isPresentationMode) {
             this.sanitizeSlideDocForPresentation(doc);
           } else if (this.isEditMode) {
@@ -1711,6 +1762,7 @@ class PresentationApp {
       if (doc) {
         this.setupIframeKeyDownBridge(doc);
         this.setupIframeSyncBridge(incomingFrame, doc);
+        this.setupIframeContextMenu(doc);
         if (this.isPresentationMode) {
           this.sanitizeSlideDocForPresentation(doc);
         } else if (this.isEditMode) {
@@ -1827,6 +1879,7 @@ class PresentationApp {
       if (doc) {
         this.setupIframeKeyDownBridge(doc);
         this.setupIframeSyncBridge(this.slideFrameEl, doc);
+        this.setupIframeContextMenu(doc);
       }
     };
 
@@ -2319,14 +2372,12 @@ class PresentationApp {
     }
   }
 
-  private async promptNewSlide(): Promise<void> {
-    if (!this.deckPath) {
-      alert('Please open or create a presentation first.');
+  private async promptNewSlide(titlePrompt?: string): Promise<void> {
+    if (!titlePrompt) {
+      this.openNewSlideModal();
       return;
     }
-    const title = prompt('Enter new slide title:', 'New Slide');
-    if (!title) return;
-
+    const title = titlePrompt;
     const insertAfter = this.currentIndex;
     const targetIndex = insertAfter >= 0 ? insertAfter + 1 : 0;
     const updatedManifest = await window.electronAPI.addNewSlide(title, insertAfter);
@@ -2335,6 +2386,389 @@ class PresentationApp {
       this.renderSidebarSlides();
       this.goToSlide(targetIndex);
     }
+  }
+
+  openNewSlideModal(): void {
+    if (!this.deckPath) {
+      alert('Please open or create a presentation first.');
+      return;
+    }
+
+    const modal = document.getElementById('new-slide-modal');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+
+    // Default title input based on current slide
+    const inputTitle = document.getElementById('input-new-slide-title') as HTMLInputElement;
+    if (inputTitle) {
+      const curSlide = this.manifest?.slides[this.currentIndex];
+      inputTitle.value = curSlide ? `${curSlide.title || 'Slide'} (New)` : 'New Slide';
+      inputTitle.focus();
+      inputTitle.select();
+    }
+
+    this.renderNewSlideTemplates();
+  }
+
+  closeNewSlideModal(): void {
+    const modal = document.getElementById('new-slide-modal');
+    modal?.classList.add('hidden');
+  }
+
+  switchNewSlideTab(tab: 'deck' | 'standard'): void {
+    const tabDeck = document.getElementById('tab-template-deck');
+    const tabStandard = document.getElementById('tab-template-standard');
+    const viewDeck = document.getElementById('new-slide-deck-view');
+    const viewStandard = document.getElementById('new-slide-standard-view');
+
+    if (tab === 'deck') {
+      tabDeck?.classList.add('active');
+      tabStandard?.classList.remove('active');
+      viewDeck?.classList.remove('hidden');
+      viewStandard?.classList.add('hidden');
+      const activeCard = (viewDeck?.querySelector('.template-card.active') as HTMLElement) || (viewDeck?.querySelector('.template-card') as HTMLElement);
+      if (activeCard) {
+        this.selectTemplateCard(activeCard, 'from-deck', parseInt(activeCard.dataset.sourceIndex || '0', 10));
+      }
+    } else {
+      tabStandard?.classList.add('active');
+      tabDeck?.classList.remove('active');
+      viewStandard?.classList.remove('hidden');
+      viewDeck?.classList.add('hidden');
+      const activeCard = (viewStandard?.querySelector('.template-card.active') as HTMLElement) || (viewStandard?.querySelector('.template-card') as HTMLElement);
+      if (activeCard) {
+        this.selectTemplateCard(activeCard, activeCard.dataset.templateType || 'blank', -1);
+      }
+    }
+  }
+
+  private renderNewSlideTemplates(): void {
+    const deckGrid = document.getElementById('new-slide-deck-grid');
+    const deckEmpty = document.getElementById('new-slide-deck-empty');
+    const badgeCount = document.getElementById('badge-deck-templates-count');
+    const standardGrid = document.getElementById('new-slide-standard-grid');
+
+    const slidesCount = this.manifest?.slides?.length || 0;
+    if (badgeCount) badgeCount.textContent = String(slidesCount);
+
+    if (slidesCount > 0) {
+      this.switchNewSlideTab('deck');
+      if (deckEmpty) deckEmpty.classList.add('hidden');
+    } else {
+      this.switchNewSlideTab('standard');
+      if (deckEmpty) deckEmpty.classList.remove('hidden');
+    }
+
+    // Render deck template cards
+    if (deckGrid && this.manifest) {
+      deckGrid.innerHTML = '';
+      const baseW = this.manifest.customWidth || 1920;
+
+      this.manifest.slides.forEach((slide, idx) => {
+        const card = document.createElement('div');
+        card.className = 'template-card';
+        card.dataset.templateType = 'from-deck';
+        card.dataset.sourceIndex = String(idx);
+
+        if (idx === this.currentIndex || (this.currentIndex < 0 && idx === 0)) {
+          card.classList.add('active');
+          this.selectedTemplateType = 'from-deck';
+          this.selectedTemplateSourceIndex = idx;
+        }
+
+        const previewWrapper = document.createElement('div');
+        previewWrapper.className = 'template-card-preview-wrapper';
+
+        const frame = document.createElement('iframe');
+        frame.className = 'template-card-preview-frame';
+        frame.tabIndex = -1;
+        frame.src = `neopres://deck/${slide.path}`;
+
+        const cardW = 240;
+        const scale = cardW / baseW;
+        frame.style.transform = `scale(${scale})`;
+
+        previewWrapper.appendChild(frame);
+
+        const info = document.createElement('div');
+        info.className = 'template-card-info';
+        info.innerHTML = `
+          <span class="template-card-title">${idx + 1}. ${slide.title || 'Slide'}</span>
+          <span class="template-card-badge">Template</span>
+        `;
+
+        card.appendChild(previewWrapper);
+        card.appendChild(info);
+
+        card.addEventListener('click', () => {
+          this.selectTemplateCard(card, 'from-deck', idx);
+          const inputTitle = document.getElementById('input-new-slide-title') as HTMLInputElement;
+          if (inputTitle) {
+            inputTitle.value = `${slide.title || 'Slide'} (New)`;
+          }
+        });
+
+        card.addEventListener('dblclick', () => {
+          this.selectTemplateCard(card, 'from-deck', idx);
+          this.submitNewSlideModal();
+        });
+
+        deckGrid.appendChild(card);
+      });
+    }
+
+    // Render standard layouts cards
+    if (standardGrid) {
+      standardGrid.innerHTML = '';
+      const standardLayouts: Array<{ type: string; title: string; desc: string; icon: string }> = [
+        { type: 'blank', title: 'Blank Slide', desc: 'Clean themed slide canvas', icon: '◻️' },
+        { type: 'title', title: 'Title Slide', desc: 'Headline & subtitle layout', icon: '🏷️' },
+        { type: 'content', title: 'Title & Content', desc: 'Header with bullet list', icon: '📝' },
+        { type: 'two-column', title: 'Two Columns', desc: 'Side-by-side comparison', icon: '⚖️' },
+        { type: 'stat', title: 'Metric Callout', desc: '3 stats & key highlights', icon: '📊' }
+      ];
+
+      standardLayouts.forEach((layout) => {
+        const card = document.createElement('div');
+        card.className = 'template-card';
+        card.dataset.templateType = layout.type;
+        card.dataset.sourceIndex = '-1';
+
+        const preview = document.createElement('div');
+        preview.className = 'template-card-standard-preview';
+        preview.innerHTML = `
+          <div style="font-size: 1.8rem;">${layout.icon}</div>
+          <div style="font-size: 0.92rem; font-weight: 700; color: #fff;">${layout.title}</div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); text-align: center;">${layout.desc}</div>
+        `;
+
+        const info = document.createElement('div');
+        info.className = 'template-card-info';
+        info.innerHTML = `
+          <span class="template-card-title">${layout.title}</span>
+          <span class="template-card-badge">Standard</span>
+        `;
+
+        card.appendChild(preview);
+        card.appendChild(info);
+
+        card.addEventListener('click', () => {
+          this.selectTemplateCard(card, layout.type, -1);
+          const inputTitle = document.getElementById('input-new-slide-title') as HTMLInputElement;
+          if (inputTitle) {
+            inputTitle.value = layout.title;
+          }
+        });
+
+        card.addEventListener('dblclick', () => {
+          this.selectTemplateCard(card, layout.type, -1);
+          this.submitNewSlideModal();
+        });
+
+        standardGrid.appendChild(card);
+      });
+    }
+  }
+
+  private selectTemplateCard(card: HTMLElement, templateType: any, sourceIndex: number): void {
+    document.querySelectorAll('.template-card').forEach(c => c.classList.remove('active'));
+    card.classList.add('active');
+    this.selectedTemplateType = templateType;
+    this.selectedTemplateSourceIndex = sourceIndex;
+  }
+
+  private async submitNewSlideModal(): Promise<void> {
+    if (!this.deckPath) return;
+
+    const inputTitle = document.getElementById('input-new-slide-title') as HTMLInputElement;
+    const title = inputTitle?.value?.trim() || 'New Slide';
+
+    const selectPos = document.getElementById('select-new-slide-position') as HTMLSelectElement;
+    const isAtEnd = selectPos?.value === 'at-end';
+
+    const insertAfter = isAtEnd
+      ? (this.manifest ? this.manifest.slides.length - 1 : -1)
+      : this.currentIndex;
+
+    const targetIndex = insertAfter >= 0 ? insertAfter + 1 : 0;
+
+    this.closeNewSlideModal();
+
+    const updatedManifest = await window.electronAPI.addSlideFromTemplate(
+      title,
+      this.selectedTemplateType,
+      this.selectedTemplateSourceIndex,
+      insertAfter
+    );
+
+    if (updatedManifest) {
+      this.manifest = updatedManifest;
+      this.renderSidebarSlides();
+      this.goToSlide(targetIndex);
+      this.showToast(`Added slide: "${title}"`);
+    }
+  }
+
+  private setupIframeContextMenu(doc: Document): void {
+    if ((doc as any).__neoDeckContextMenuAttached) return;
+    (doc as any).__neoDeckContextMenuAttached = true;
+
+    doc.addEventListener('contextmenu', (e: MouseEvent) => {
+      this.handleSlideObjectContextMenu(e, doc);
+    });
+
+    doc.addEventListener('pointerdown', (e: MouseEvent) => {
+      if (e.button === 0) {
+        this.hideObjectContextMenu();
+        this.hideSorterContextMenu();
+      }
+    });
+  }
+
+  private resolveSlideObject(target: HTMLElement, doc: Document): HTMLElement | null {
+    if (!target || target === doc.body || target === doc.documentElement) return null;
+    const slideContainer = doc.querySelector('main.slide-container') || doc.body;
+    if (target === slideContainer) return null;
+
+    if (target.closest('#neo-selection-overlay') || target.classList.contains('neo-move-handle') || target.classList.contains('neo-resize-handle')) {
+      return this.currentActiveElement;
+    }
+
+    const container = target.closest('.abs, .tb, .card, .badge, .pic, [data-spid], .editor-draggable') as HTMLElement | null;
+    if (container && container !== doc.body && container !== slideContainer) {
+      return container;
+    }
+
+    const semantic = target.closest('img, svg, p, h1, h2, h3, h4, h5, h6, table, canvas, video, audio, button, li, figure, blockquote, div') as HTMLElement | null;
+    if (semantic && semantic !== doc.body && semantic !== slideContainer) {
+      return semantic;
+    }
+
+    return target !== doc.body && target !== slideContainer ? target : null;
+  }
+
+  private handleSlideObjectContextMenu(e: MouseEvent, doc: Document): void {
+    if (this.isPresentationMode) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    this.hideSorterContextMenu();
+
+    const target = e.target as HTMLElement;
+    const obj = this.resolveSlideObject(target, doc);
+
+    if (!obj) {
+      this.hideObjectContextMenu();
+      return;
+    }
+
+    if (!this.isEditMode) {
+      this.toggleEditMode();
+    }
+
+    this.currentActiveElement = obj;
+    this.renderSelectionOverlay(obj);
+
+    const activeFrame = this.activeFrameIndex === 0 ? this.slideFrameEl : this.idleFrameEl;
+    const iframeRect = activeFrame.getBoundingClientRect();
+    const scaleX = iframeRect.width / (activeFrame.offsetWidth || 1);
+    const scaleY = iframeRect.height / (activeFrame.offsetHeight || 1);
+    const screenX = iframeRect.left + (e.clientX * scaleX);
+    const screenY = iframeRect.top + (e.clientY * scaleY);
+
+    this.showObjectContextMenu(obj, screenX, screenY);
+  }
+
+  private showObjectContextMenu(obj: HTMLElement, x: number, y: number): void {
+    const menu = this.slideObjectContextMenuEl;
+    if (!menu) return;
+
+    const header = document.getElementById('ctx-object-header');
+    if (header) {
+      let tagDesc = obj.tagName.toLowerCase();
+      if (obj.classList.contains('tb') || obj.classList.contains('textbox')) tagDesc = 'Text Box';
+      else if (obj.tagName === 'IMG' || obj.classList.contains('pic')) tagDesc = 'Image';
+      else if (obj.tagName === 'svg' || obj.querySelector('svg')) tagDesc = 'Shape';
+      else if (obj.classList.contains('card')) tagDesc = 'Card';
+      else if (obj.classList.contains('badge')) tagDesc = 'Badge';
+      else if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagDesc)) tagDesc = 'Heading';
+      else if (tagDesc === 'p') tagDesc = 'Paragraph';
+      header.textContent = `Slide Object (${tagDesc})`;
+    }
+
+    menu.classList.remove('hidden');
+
+    const menuW = 190;
+    const menuH = 170;
+    const posX = (x + menuW > window.innerWidth) ? (x - menuW) : x;
+    const posY = (y + menuH > window.innerHeight) ? (y - menuH) : y;
+
+    menu.style.left = `${posX}px`;
+    menu.style.top = `${posY}px`;
+  }
+
+  private hideObjectContextMenu(): void {
+    if (this.slideObjectContextMenuEl) {
+      this.slideObjectContextMenuEl.classList.add('hidden');
+    }
+  }
+
+  async deleteCurrentObject(): Promise<void> {
+    if (this.isPresentationMode) return;
+    const target = this.currentActiveElement;
+    if (!target) return;
+
+    this.currentActiveElement = null;
+
+    const activeFrame = this.activeFrameIndex === 0 ? this.slideFrameEl : this.idleFrameEl;
+    const doc = activeFrame.contentDocument;
+    doc?.getElementById('neo-selection-overlay')?.remove();
+
+    target.remove();
+
+    this.hideObjectContextMenu();
+
+    await this.saveSlideHtml();
+    this.showToast('Object deleted from slide');
+  }
+
+  duplicateCurrentObject(): void {
+    if (this.isPresentationMode || !this.currentActiveElement) return;
+    const target = this.currentActiveElement;
+    const clone = target.cloneNode(true) as HTMLElement;
+
+    const currentLeft = parseFloat(clone.style.left) || 0;
+    const currentTop = parseFloat(clone.style.top) || 0;
+    if (clone.style.position === 'absolute' || clone.style.position === 'fixed') {
+      clone.style.left = `${currentLeft + 30}px`;
+      clone.style.top = `${currentTop + 30}px`;
+    }
+
+    target.parentElement?.appendChild(clone);
+    this.currentActiveElement = clone;
+    this.renderSelectionOverlay(clone);
+    this.hideObjectContextMenu();
+    this.saveSlideHtml();
+    this.showToast('Object duplicated');
+  }
+
+  bringCurrentObjectToFront(): void {
+    if (this.isPresentationMode || !this.currentActiveElement) return;
+    const target = this.currentActiveElement;
+    const currentZ = parseInt(target.style.zIndex || '0', 10);
+    target.style.zIndex = `${Math.max(10, currentZ + 10)}`;
+    this.hideObjectContextMenu();
+    this.saveSlideHtml();
+  }
+
+  sendCurrentObjectToBack(): void {
+    if (this.isPresentationMode || !this.currentActiveElement) return;
+    const target = this.currentActiveElement;
+    target.style.zIndex = '0';
+    this.hideObjectContextMenu();
+    this.saveSlideHtml();
   }
 
   private openWebSlideModal(): void {

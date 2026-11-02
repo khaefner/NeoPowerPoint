@@ -739,6 +739,391 @@ ${bodyContent}
   }
 
   /**
+   * Generates a template slide (either from an existing slide in the deck or a built-in standard layout).
+   */
+  async addSlideFromTemplate(
+    folderPath: string,
+    title: string,
+    templateType: 'from-deck' | 'blank' | 'title' | 'content' | 'two-column' | 'stat' | string,
+    sourceSlideIndex: number = -1,
+    insertAfterIndex: number = -1
+  ): Promise<DeckManifest> {
+    const manifestPath = path.join(folderPath, 'deck.json');
+    const raw = await fs.promises.readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(raw) as DeckManifest;
+
+    let htmlContent = '';
+    let notesContent = '';
+    let transition = 'fade';
+
+    if (templateType === 'from-deck' && sourceSlideIndex >= 0 && sourceSlideIndex < manifest.slides.length) {
+      const sourceSlide = manifest.slides[sourceSlideIndex];
+      const sourceHtmlPath = path.resolve(folderPath, sourceSlide.path);
+      if (fs.existsSync(sourceHtmlPath)) {
+        htmlContent = await fs.promises.readFile(sourceHtmlPath, 'utf-8');
+        // Update slide title in <title> tag if present
+        if (htmlContent.includes('<title>')) {
+          htmlContent = htmlContent.replace(/<title>[\s\S]*?<\/title>/i, `<title>${title}</title>`);
+        }
+      } else {
+        htmlContent = this.generateStandardLayoutHtml(title, 'blank');
+      }
+      transition = sourceSlide.transition || 'fade';
+    } else {
+      // Standard Layouts
+      htmlContent = this.generateStandardLayoutHtml(title, templateType);
+    }
+
+    const folderSlug = `${Date.now()}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'slide'}`;
+    const slideDir = path.join(folderPath, 'slides', folderSlug);
+    await fs.promises.mkdir(slideDir, { recursive: true });
+
+    await fs.promises.writeFile(path.join(slideDir, 'index.html'), htmlContent, 'utf-8');
+
+    const notesPath = path.posix.join('slides', folderSlug, 'notes.html');
+    const notesHtml = this.formatNotesHtml(title, notesContent);
+    await fs.promises.writeFile(path.join(slideDir, 'notes.html'), notesHtml, 'utf-8');
+
+    const newSlide: SlideMetadata = {
+      id: `slide-${Date.now()}`,
+      title,
+      path: path.posix.join('slides', folderSlug, 'index.html'),
+      notesPath,
+      notes: notesContent,
+      transition
+    };
+
+    if (insertAfterIndex >= 0 && insertAfterIndex < manifest.slides.length) {
+      manifest.slides.splice(insertAfterIndex + 1, 0, newSlide);
+    } else {
+      manifest.slides.push(newSlide);
+    }
+
+    await this.saveManifest(folderPath, manifest);
+    return manifest;
+  }
+
+  /**
+   * Returns HTML string for standard theme-aware slide layouts.
+   */
+  generateStandardLayoutHtml(title: string, layoutType: string): string {
+    switch (layoutType) {
+      case 'title':
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg-primary, radial-gradient(circle at 50% 30%, #1e1b4b 0%, #030712 100%));
+      color: var(--text-primary, #f8fafc);
+      font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 60px;
+      position: relative;
+    }
+    .slide-container {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      max-width: 1200px;
+    }
+    h1 {
+      font-size: 4.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 24px;
+      color: var(--text-primary, #f8fafc);
+      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p {
+      font-size: 1.8rem;
+      color: var(--text-secondary, #94a3b8);
+      max-width: 900px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main class="slide slide-container">
+    <h1>${title}</h1>
+    <p>Subtitle or presentation topic summary goes here</p>
+  </main>
+</body>
+</html>`;
+
+      case 'content':
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg-primary, #090d16);
+      color: var(--text-primary, #f8fafc);
+      font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+      padding: 70px 90px;
+      position: relative;
+    }
+    .slide-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    h1 {
+      font-size: 3.4rem;
+      font-weight: 700;
+      margin-bottom: 40px;
+      color: var(--text-primary, #f8fafc);
+      border-bottom: 2px solid var(--accent-primary, #38bdf8);
+      padding-bottom: 16px;
+    }
+    ul {
+      list-style-type: disc;
+      padding-left: 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    li {
+      font-size: 1.7rem;
+      color: var(--text-secondary, #cbd5e1);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main class="slide slide-container">
+    <h1>${title}</h1>
+    <ul>
+      <li>First key point or strategic observation</li>
+      <li>Second supporting detail with quantitative context</li>
+      <li>Third takeaway or conclusion for your audience</li>
+    </ul>
+  </main>
+</body>
+</html>`;
+
+      case 'two-column':
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg-primary, #090d16);
+      color: var(--text-primary, #f8fafc);
+      font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+      padding: 60px 80px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .slide-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    h1 {
+      font-size: 3.2rem;
+      font-weight: 700;
+      margin-bottom: 40px;
+      color: var(--text-primary, #f8fafc);
+    }
+    .columns-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      flex: 1;
+    }
+    .col-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 36px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .col-card h2 {
+      font-size: 2rem;
+      color: var(--accent-primary, #38bdf8);
+      font-weight: 600;
+    }
+    .col-card p {
+      font-size: 1.4rem;
+      color: var(--text-secondary, #cbd5e1);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main class="slide slide-container">
+    <h1>${title}</h1>
+    <div class="columns-grid">
+      <div class="col-card">
+        <h2>Primary Concept</h2>
+        <p>Detailed analysis of the first perspective, including operational requirements, architectural features, and advantages.</p>
+      </div>
+      <div class="col-card">
+        <h2>Counterpart Concept</h2>
+        <p>Comparative breakdown of alternative approaches, potential tradeoffs, performance considerations, and risk mitigations.</p>
+      </div>
+    </div>
+  </main>
+</body>
+</html>`;
+
+      case 'stat':
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg-primary, #090d16);
+      color: var(--text-primary, #f8fafc);
+      font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+      padding: 60px 80px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .slide-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    h1 {
+      font-size: 3.2rem;
+      font-weight: 700;
+      margin-bottom: 48px;
+      color: var(--text-primary, #f8fafc);
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 32px;
+      flex: 1;
+      align-items: center;
+    }
+    .stat-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      padding: 40px 24px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .stat-num {
+      font-size: 4.8rem;
+      font-weight: 800;
+      color: var(--accent-primary, #38bdf8);
+      line-height: 1;
+    }
+    .stat-label {
+      font-size: 1.3rem;
+      color: var(--text-secondary, #94a3b8);
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <main class="slide slide-container">
+    <h1>${title}</h1>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-num">99.9%</div>
+        <div class="stat-label">System Availability</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">4.8x</div>
+        <div class="stat-label">Performance Speedup</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">&lt; 15ms</div>
+        <div class="stat-label">Global Latency</div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>`;
+
+      case 'blank':
+      default:
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg-primary, #0f172a);
+      color: var(--text-primary, #f8fafc);
+      font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+      position: relative;
+    }
+    .slide-container {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+  <main class="slide slide-container">
+  </main>
+</body>
+</html>`;
+    }
+  }
+
+  /**
    * Inserts a slide with custom HTML content (e.g. from AI generation)
    */
   async addCustomSlide(folderPath: string, title: string, htmlContent: string, insertAfterIndex: number = -1): Promise<DeckManifest> {

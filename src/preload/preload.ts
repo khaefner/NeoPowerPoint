@@ -21,6 +21,7 @@ export interface ElectronAPI {
   openExternalUrl: (url: string) => Promise<boolean>;
   getManifest: () => Promise<DeckManifest | null>;
   addNewSlide: (title: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
+  addSlideFromTemplate: (title: string, templateType: string, sourceSlideIndex?: number, insertAfterIndex?: number) => Promise<DeckManifest | null>;
   addWebSlide: (title: string, url: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
   addCustomSlide: (title: string, htmlContent: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
   duplicateSlide: (slideIndex: number) => Promise<DeckManifest | null>;
@@ -50,6 +51,7 @@ export interface ElectronAPI {
   onToggleWindowedEvent: (callback: () => void) => () => void;
   onOpenPresenterEvent: (callback: () => void) => () => void;
   onReloadSlideEvent: (callback: () => void) => () => void;
+  onNewSlideMenuEvent: (callback: () => void) => () => void;
   onSetPresentationModeEvent: (callback: (enabled: boolean) => void) => () => void;
   onInkAction: (callback: (action: any) => void) => () => void;
   sendInkAction: (action: any) => void;
@@ -81,6 +83,7 @@ const api: ElectronAPI = {
   openExternalUrl: (url) => ipcRenderer.invoke('shell:open-external', url),
   getManifest: () => ipcRenderer.invoke('deck:get-manifest'),
   addNewSlide: (title, insertAfterIndex) => ipcRenderer.invoke('deck:add-slide', title, insertAfterIndex),
+  addSlideFromTemplate: (title, templateType, sourceSlideIndex, insertAfterIndex) => ipcRenderer.invoke('deck:add-slide-from-template', title, templateType, sourceSlideIndex, insertAfterIndex),
   addWebSlide: (title, url, insertAfterIndex) => ipcRenderer.invoke('deck:add-web-slide', title, url, insertAfterIndex),
   addCustomSlide: (title, htmlContent, insertAfterIndex) => ipcRenderer.invoke('deck:add-custom-slide', title, htmlContent, insertAfterIndex),
   duplicateSlide: (slideIndex) => ipcRenderer.invoke('deck:duplicate-slide', slideIndex),
@@ -156,6 +159,12 @@ const api: ElectronAPI = {
     const handler = () => callback();
     ipcRenderer.on('menu:reload-slide', handler);
     return () => ipcRenderer.removeListener('menu:reload-slide', handler);
+  },
+
+  onNewSlideMenuEvent: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('menu:new-slide', handler);
+    return () => ipcRenderer.removeListener('menu:new-slide', handler);
   },
 
   onSetPresentationModeEvent: (callback) => {

@@ -514,6 +514,15 @@ function buildAppMenu(): void {
           }
         },
         {
+          label: 'New Slide from Template...',
+          accelerator: 'CmdOrCtrl+M',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('menu:new-slide');
+            }
+          }
+        },
+        {
           label: 'New Presentation...',
           accelerator: 'CmdOrCtrl+N',
           click: async () => {
@@ -904,6 +913,12 @@ ipcMain.handle('deck:add-slide', async (_, title: string, insertAfterIndex?: num
   const activePath = deckService.getActiveDeckPath();
   if (!activePath) return null;
   return deckService.addNewSlide(activePath, title, insertAfterIndex);
+});
+
+ipcMain.handle('deck:add-slide-from-template', async (_, title: string, templateType: string, sourceSlideIndex?: number, insertAfterIndex?: number) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.addSlideFromTemplate(activePath, title, templateType as any, sourceSlideIndex, insertAfterIndex);
 });
 
 ipcMain.handle('deck:add-web-slide', async (_, title: string, url: string, insertAfterIndex?: number) => {

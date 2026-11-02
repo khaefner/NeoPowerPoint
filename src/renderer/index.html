@@ -36,6 +36,11 @@
       </div>
 
       <div class="toolbar-right">
+        <button id="btn-add-slide-toolbar" class="toolbar-btn" title="Add New Slide from Template (Ctrl+M)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span class="btn-label-text">New Slide</span>
+        </button>
+
         <button id="btn-save-slide" class="toolbar-btn btn-save" title="Save Slide Changes (Ctrl+S)">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
           <span class="btn-label-text">Save</span>
@@ -83,7 +88,7 @@
             <button id="menu-export-package">💾 Export as .neopres...</button>
             <div class="dropdown-divider"></div>
             <button id="menu-new-deck">✨ New Presentation...</button>
-            <button id="menu-new-slide">➕ Add Blank Slide...</button>
+            <button id="menu-new-slide">➕ Add New Slide... (Ctrl+M)</button>
             <button id="menu-new-web-slide">🌐 Embed Web Page Slide...</button>
             <button id="menu-ai-designer">✨ AI Slide Designer...</button>
             <button id="menu-toggle-edit">✏️ Edit Slide (Ctrl+E)</button>
@@ -350,6 +355,8 @@
           <div class="shortcut-item"><kbd>→</kbd> / <kbd>Space</kbd> / <kbd>PageDown</kbd><span>Next Slide</span></div>
           <div class="shortcut-item"><kbd>←</kbd> / <kbd>Backspace</kbd> / <kbd>PageUp</kbd><span>Previous Slide</span></div>
           <div class="shortcut-item"><kbd>Home</kbd> / <kbd>End</kbd><span>First / Last Slide</span></div>
+          <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>M</kbd><span>Add New Slide from Template</span></div>
+          <div class="shortcut-item"><kbd>Del</kbd> / <kbd>Backspace</kbd><span>Delete Selected Slide Object</span></div>
           <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>E</kbd><span>Toggle Slide WYSIWYG Edit Mode</span></div>
           <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>S</kbd><span>Save Slide Changes (in Edit Mode)</span></div>
           <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>B</kbd> / <kbd>I</kbd><span>Bold / Italic (while editing text)</span></div>
@@ -507,6 +514,74 @@
     </div>
   </div>
 
+  <!-- Add New Slide from Template Modal -->
+  <div id="new-slide-modal" class="modal-overlay hidden">
+    <div class="modal-card new-slide-modal-card">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-primary);"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+          <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700;">Add New Slide</h3>
+        </div>
+        <button id="btn-close-new-slide-modal" class="btn-icon" title="Close (Esc)">✕</button>
+      </div>
+
+      <div class="new-slide-modal-body">
+        <div class="new-slide-top-bar">
+          <div class="new-slide-field" style="flex: 1;">
+            <label for="input-new-slide-title">Slide Title</label>
+            <input type="text" id="input-new-slide-title" class="editor-select" placeholder="Enter slide title..." value="New Slide">
+          </div>
+          <div class="new-slide-field" style="min-width: 200px;">
+            <label for="select-new-slide-position">Insert Position</label>
+            <select id="select-new-slide-position" class="editor-select">
+              <option value="after-current">After Current Slide</option>
+              <option value="at-end">At End of Presentation</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Template Tabs -->
+        <div class="new-slide-tabs-bar">
+          <div class="segmented-control">
+            <button id="tab-template-deck" class="segment-btn active" data-tab="deck">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+              <span>From This Deck</span>
+              <span id="badge-deck-templates-count" class="tab-count-badge">0</span>
+            </button>
+            <button id="tab-template-standard" class="segment-btn" data-tab="standard">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+              <span>Standard Layouts</span>
+              <span class="tab-count-badge">5</span>
+            </button>
+          </div>
+          <span style="font-size: 0.8rem; color: var(--text-muted);">Double-click a template to insert instantly</span>
+        </div>
+
+        <!-- Deck Templates View -->
+        <div id="new-slide-deck-view" class="template-grid-container">
+          <div id="new-slide-deck-grid" class="template-cards-grid">
+            <!-- Populated dynamically with slide cards from open deck -->
+          </div>
+          <div id="new-slide-deck-empty" class="template-empty-message hidden">
+            <p>No slides in this presentation yet. Choose from Standard Layouts above!</p>
+          </div>
+        </div>
+
+        <!-- Standard Layouts View -->
+        <div id="new-slide-standard-view" class="template-grid-container hidden">
+          <div id="new-slide-standard-grid" class="template-cards-grid">
+            <!-- Standard layout cards -->
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end; padding: 14px 20px; border-top: 1px solid var(--border-color);">
+        <button id="btn-cancel-new-slide-modal" class="btn btn-secondary">Cancel</button>
+        <button id="btn-confirm-new-slide-modal" class="btn btn-primary">➕ Add Slide</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Global Slide Context Menu (Works on Slide Sorter & Sidebar) -->
   <div id="sorter-context-menu" class="sorter-context-menu hidden">
     <button id="ctx-move-top" class="ctx-item">
@@ -530,6 +605,29 @@
     <button id="ctx-delete" class="ctx-item ctx-danger">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
       Delete Slide
+    </button>
+  </div>
+
+  <!-- Slide Object Right-Click Context Menu -->
+  <div id="slide-object-context-menu" class="sorter-context-menu hidden">
+    <div class="ctx-header" id="ctx-object-header" style="padding: 4px 10px; font-size: 0.72rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Slide Object</div>
+    <button id="ctx-delete-object" class="ctx-item ctx-danger" title="Delete this object (Del / Backspace)">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+      <span>Delete Object</span>
+      <kbd class="ctx-shortcut-badge">Del</kbd>
+    </button>
+    <div class="ctx-divider"></div>
+    <button id="ctx-duplicate-object" class="ctx-item" title="Duplicate this object">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span>Duplicate Object</span>
+    </button>
+    <button id="ctx-bring-front" class="ctx-item" title="Bring to top layer">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>
+      <span>Bring to Front</span>
+    </button>
+    <button id="ctx-send-back" class="ctx-item" title="Send to bottom layer">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>
+      <span>Send to Back</span>
     </button>
   </div>
 
