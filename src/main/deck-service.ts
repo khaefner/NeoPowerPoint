@@ -1124,6 +1124,207 @@ ${bodyContent}
   }
 
   /**
+   * Inspects an external HTML file to retrieve slide metadata, preview content, and detect companion notes/assets.
+   */
+  async inspectHtmlFile(sourceHtmlPath: string): Promise<{
+    filePath: string;
+    title: string;
+    htmlContent: string;
+    byteSize: number;
+    hasAssets: boolean;
+    hasNotes: boolean;
+    notesContent: string;
+  }> {
+    const resolvedPath = path.resolve(sourceHtmlPath);
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error(`File not found: ${sourceHtmlPath}`);
+    }
+
+    const stat = await fs.promises.stat(resolvedPath);
+    const htmlContent = await fs.promises.readFile(resolvedPath, 'utf-8');
+
+    // Extract title from <title> tag or filename
+    let detectedTitle = '';
+    const titleMatch = htmlContent.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (titleMatch && titleMatch[1].trim()) {
+      detectedTitle = titleMatch[1].trim();
+    } else {
+      const baseName = path.basename(resolvedPath, path.extname(resolvedPath));
+      detectedTitle = baseName.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+
+    // Check for companion notes in directory or within HTML
+    const sourceDir = path.dirname(resolvedPath);
+    const baseName = path.basename(resolvedPath, path.extname(resolvedPath));
+    const candidateNotes = [
+      path.join(sourceDir, 'notes.html'),
+      path.join(sourceDir, `${baseName}.notes.html`),
+      path.join(sourceDir, `${baseName}-notes.html`),
+      path.join(sourceDir, 'notes.txt'),
+      path.join(sourceDir, `${baseName}.notes.txt`),
+      path.join(sourceDir, `${baseName}-notes.txt`)
+    ];
+
+    let notesContent = '';
+    let hasNotes = false;
+    for (const cand of candidateNotes) {
+      if (fs.existsSync(cand)) {
+        notesContent = await fs.promises.readFile(cand, 'utf-8');
+        hasNotes = true;
+        break;
+      }
+    }
+
+    if (!hasNotes) {
+      const notesMatch = htmlContent.match(/<(?:aside|div)[^>]*(?:class|id)=["'][^"']*(?:speaker-)?notes[^"']*["'][^>]*>([\s\S]*?)<\/(?:aside|div)>/i);
+      if (notesMatch && notesMatch[1].trim()) {
+        notesContent = notesMatch[1].trim();
+        hasNotes = true;
+      }
+    }
+
+    // Detect if sibling asset directories exist
+    let hasAssets = false;
+    const assetDirNames = ['assets', 'images', 'img', 'css', 'js', 'media', 'fonts', 'static'];
+    for (const dirName of assetDirNames) {
+      const candDir = path.join(sourceDir, dirName);
+      if (fs.existsSync(candDir) && fs.statSync(candDir).isDirectory()) {
+        hasAssets = true;
+        break;
+      }
+    }
+
+    return {
+      filePath: resolvedPath,
+      title: detectedTitle || 'Slide',
+      htmlContent,
+      byteSize: stat.size,
+      hasAssets,
+      hasNotes,
+      notesContent
+    };
+  }
+
+  /**
+   * Adds an existing HTML file from disk as a new slide in the deck.
+   * Copies the HTML file, local assets, and speaker notes into the presentation folder.
+   */
+  async addSlideFromHtmlFile(
+    folderPath: string,
+    sourceHtmlPath: string,
+    customTitle?: string,
+    insertAfterIndex: number = -1
+  ): Promise<DeckManifest> {
+    const inspection = await this.inspectHtmlFile(sourceHtmlPath);
+    const title = customTitle && customTitle.trim() ? customTitle.trim() : inspection.title;
+
+    let htmlContent = inspection.htmlContent;
+
+    // Update <title> if title was customized or missing
+    if (htmlContent.includes('<title>')) {
+      htmlContent = htmlContent.replace(/<title[^>]*>[\s\S]*?<\/title>/i, `<title>${title}</title>`);
+    } else if (htmlContent.includes('</head>')) {
+      htmlContent = htmlContent.replace('</head>', `  <title>${title}</title>\n</head>`);
+    }
+
+    // Ensure it's a complete HTML document if only a fragment was provided
+    if (!/<html[\s>]/i.test(htmlContent) && !/<body[\s>]/i.test(htmlContent)) {
+      htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <link rel="stylesheet" href="../../assets/theme.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 40px;
+      box-sizing: border-box;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+  </style>
+</head>
+<body>
+${htmlContent}
+</body>
+</html>`;
+    }
+
+    const folderSlug = `${Date.now()}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'slide'}`;
+    const slideDir = path.join(folderPath, 'slides', folderSlug);
+    await fs.promises.mkdir(slideDir, { recursive: true });
+
+    // Save main HTML file
+    await fs.promises.writeFile(path.join(slideDir, 'index.html'), htmlContent, 'utf-8');
+
+    // Save companion notes
+    const notesPath = path.posix.join('slides', folderSlug, 'notes.html');
+    const notesHtml = this.formatNotesHtml(title, inspection.notesContent);
+    await fs.promises.writeFile(path.join(slideDir, 'notes.html'), notesHtml, 'utf-8');
+
+    // Copy associated local assets if present
+    const sourceDir = path.dirname(path.resolve(sourceHtmlPath));
+    const assetDirNames = ['assets', 'images', 'img', 'css', 'js', 'media', 'fonts', 'static'];
+    for (const dirName of assetDirNames) {
+      const candidateDir = path.join(sourceDir, dirName);
+      if (fs.existsSync(candidateDir) && fs.statSync(candidateDir).isDirectory()) {
+        const destDir = path.join(slideDir, dirName);
+        await fs.promises.cp(candidateDir, destDir, { recursive: true });
+      }
+    }
+
+    // Scan for relative src/href asset references and copy individual files if present
+    const relMatches = htmlContent.matchAll(/(?:src|href)=["']([^"':#?]+)["']/gi);
+    for (const match of relMatches) {
+      const refPath = match[1];
+      if (
+        !refPath.startsWith('http://') &&
+        !refPath.startsWith('https://') &&
+        !refPath.startsWith('//') &&
+        !refPath.startsWith('data:') &&
+        !refPath.startsWith('neopres:')
+      ) {
+        const candidateFile = path.resolve(sourceDir, refPath);
+        const destFile = path.resolve(slideDir, refPath);
+        if (fs.existsSync(candidateFile) && !fs.existsSync(destFile)) {
+          if (destFile.startsWith(slideDir)) {
+            await fs.promises.mkdir(path.dirname(destFile), { recursive: true });
+            await fs.promises.copyFile(candidateFile, destFile);
+          }
+        }
+      }
+    }
+
+    // Update manifest
+    const manifestPath = path.join(folderPath, 'deck.json');
+    const raw = await fs.promises.readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(raw) as DeckManifest;
+
+    const newSlide: SlideMetadata = {
+      id: `slide-${Date.now()}`,
+      title,
+      path: path.posix.join('slides', folderSlug, 'index.html'),
+      notesPath,
+      notes: inspection.notesContent,
+      transition: 'fade'
+    };
+
+    if (insertAfterIndex >= 0 && insertAfterIndex < manifest.slides.length) {
+      manifest.slides.splice(insertAfterIndex + 1, 0, newSlide);
+    } else {
+      manifest.slides.push(newSlide);
+    }
+
+    await this.saveManifest(folderPath, manifest);
+    return manifest;
+  }
+
+  /**
    * Inserts a slide with custom HTML content (e.g. from AI generation)
    */
   async addCustomSlide(folderPath: string, title: string, htmlContent: string, insertAfterIndex: number = -1): Promise<DeckManifest> {

@@ -22,6 +22,17 @@ export interface ElectronAPI {
   getManifest: () => Promise<DeckManifest | null>;
   addNewSlide: (title: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
   addSlideFromTemplate: (title: string, templateType: string, sourceSlideIndex?: number, insertAfterIndex?: number) => Promise<DeckManifest | null>;
+  selectHtmlFileDialog: () => Promise<string | null>;
+  inspectHtmlFile: (filePath: string) => Promise<{
+    filePath: string;
+    title: string;
+    htmlContent: string;
+    byteSize: number;
+    hasAssets: boolean;
+    hasNotes: boolean;
+    notesContent: string;
+  } | null>;
+  addSlideFromHtmlFile: (sourceFilePath: string, title?: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
   addWebSlide: (title: string, url: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
   addCustomSlide: (title: string, htmlContent: string, insertAfterIndex?: number) => Promise<DeckManifest | null>;
   duplicateSlide: (slideIndex: number) => Promise<DeckManifest | null>;
@@ -52,6 +63,7 @@ export interface ElectronAPI {
   onOpenPresenterEvent: (callback: () => void) => () => void;
   onReloadSlideEvent: (callback: () => void) => () => void;
   onNewSlideMenuEvent: (callback: () => void) => () => void;
+  onNewHtmlSlideMenuEvent: (callback: () => void) => () => void;
   onSetPresentationModeEvent: (callback: (enabled: boolean) => void) => () => void;
   onInkAction: (callback: (action: any) => void) => () => void;
   sendInkAction: (action: any) => void;
@@ -84,6 +96,9 @@ const api: ElectronAPI = {
   getManifest: () => ipcRenderer.invoke('deck:get-manifest'),
   addNewSlide: (title, insertAfterIndex) => ipcRenderer.invoke('deck:add-slide', title, insertAfterIndex),
   addSlideFromTemplate: (title, templateType, sourceSlideIndex, insertAfterIndex) => ipcRenderer.invoke('deck:add-slide-from-template', title, templateType, sourceSlideIndex, insertAfterIndex),
+  selectHtmlFileDialog: () => ipcRenderer.invoke('dialog:select-html-file'),
+  inspectHtmlFile: (filePath) => ipcRenderer.invoke('deck:inspect-html-file', filePath),
+  addSlideFromHtmlFile: (sourceFilePath, title, insertAfterIndex) => ipcRenderer.invoke('deck:add-slide-from-html-file', sourceFilePath, title, insertAfterIndex),
   addWebSlide: (title, url, insertAfterIndex) => ipcRenderer.invoke('deck:add-web-slide', title, url, insertAfterIndex),
   addCustomSlide: (title, htmlContent, insertAfterIndex) => ipcRenderer.invoke('deck:add-custom-slide', title, htmlContent, insertAfterIndex),
   duplicateSlide: (slideIndex) => ipcRenderer.invoke('deck:duplicate-slide', slideIndex),
@@ -165,6 +180,12 @@ const api: ElectronAPI = {
     const handler = () => callback();
     ipcRenderer.on('menu:new-slide', handler);
     return () => ipcRenderer.removeListener('menu:new-slide', handler);
+  },
+
+  onNewHtmlSlideMenuEvent: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('menu:new-html-slide', handler);
+    return () => ipcRenderer.removeListener('menu:new-html-slide', handler);
   },
 
   onSetPresentationModeEvent: (callback) => {

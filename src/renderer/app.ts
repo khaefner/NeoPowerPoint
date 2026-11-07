@@ -74,8 +74,9 @@ class PresentationApp {
   private newSlideModalEl = document.getElementById('new-slide-modal');
 
   // New Slide Template Selection State
-  private selectedTemplateType: 'from-deck' | 'blank' | 'title' | 'content' | 'two-column' | 'stat' | string = 'from-deck';
+  private selectedTemplateType: 'from-deck' | 'blank' | 'title' | 'content' | 'two-column' | 'stat' | 'from-html-file' | string = 'from-deck';
   private selectedTemplateSourceIndex: number = 0;
+  private selectedHtmlFilePath: string | null = null;
 
   // WYSIWYG Editor Selection State
   private currentActiveElement: HTMLElement | null = null;
@@ -158,6 +159,7 @@ class PresentationApp {
     document.getElementById('menu-export-package')!.addEventListener('click', () => this.exportPackage());
     document.getElementById('menu-new-deck')!.addEventListener('click', () => this.newDeck());
     document.getElementById('menu-new-slide')!.addEventListener('click', () => this.openNewSlideModal());
+    document.getElementById('menu-new-html-slide')?.addEventListener('click', () => this.addSlideFromHtmlFileDirect());
     document.getElementById('menu-new-web-slide')?.addEventListener('click', () => this.openWebSlideModal());
     document.getElementById('menu-toggle-edit')?.addEventListener('click', () => this.toggleEditMode());
     document.getElementById('menu-save-slide')?.addEventListener('click', () => this.saveSlideHtml());
@@ -201,12 +203,19 @@ class PresentationApp {
     document.getElementById('btn-confirm-new-slide-modal')?.addEventListener('click', () => this.submitNewSlideModal());
     document.getElementById('tab-template-deck')?.addEventListener('click', () => this.switchNewSlideTab('deck'));
     document.getElementById('tab-template-standard')?.addEventListener('click', () => this.switchNewSlideTab('standard'));
+    document.getElementById('tab-template-html')?.addEventListener('click', () => this.switchNewSlideTab('html'));
+    document.getElementById('btn-browse-new-slide-html')?.addEventListener('click', () => this.browseHtmlSlideFile());
+    document.getElementById('btn-change-html-file')?.addEventListener('click', () => this.browseHtmlSlideFile());
 
     // Slide Object Context Menu Actions
     document.getElementById('ctx-delete-object')?.addEventListener('click', () => this.deleteCurrentObject());
     document.getElementById('ctx-duplicate-object')?.addEventListener('click', () => this.duplicateCurrentObject());
     document.getElementById('ctx-bring-front')?.addEventListener('click', () => this.bringCurrentObjectToFront());
     document.getElementById('ctx-send-back')?.addEventListener('click', () => this.sendCurrentObjectToBack());
+    document.getElementById('ctx-new-html-slide')?.addEventListener('click', () => {
+      this.hideSorterContextMenu();
+      this.addSlideFromHtmlFileDirect(this.contextMenuTargetIndex);
+    });
 
     // Error & Diagnostics Modal
     document.getElementById('btn-close-error-modal')?.addEventListener('click', () => this.hideErrorModal());
@@ -465,6 +474,7 @@ class PresentationApp {
 
     // Remote navigation from Presenter window or main menu
     window.electronAPI.onNavigateSlide((target: any) => {
+      console.log(`[NeoDeck] onNavigateSlide received target: ${target} (current slide: ${this.currentIndex + 1})`);
       if (target === 'next') this.nextSlide();
       else if (target === 'prev') this.prevSlide();
       else if (target === 'last') this.goToSlide(this.manifest ? this.manifest.slides.length - 1 : 0);
@@ -485,6 +495,66 @@ class PresentationApp {
 
     window.electronAPI.onNewSlideMenuEvent?.(() => {
       this.openNewSlideModal();
+    });
+
+    window.electronAPI.onNewHtmlSlideMenuEvent?.(() => {
+      this.addSlideFromHtmlFileDirect();
+    });
+
+    // Dropzone drag-and-drop
+    const dropzone = document.getElementById('html-file-dropzone');
+    dropzone?.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+    dropzone?.addEventListener('dragleave', () => {
+      dropzone.classList.remove('dragover');
+    });
+    dropzone?.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        const filePath = (file as any).path || file.name;
+        if (filePath && (filePath.endsWith('.html') || filePath.endsWith('.htm'))) {
+          await this.loadHtmlSlideFile(filePath);
+        }
+      }
+    });
+
+    // Window-level HTML slide drop
+    window.addEventListener('dragover', (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault();
+      }
+    });
+
+    window.addEventListener('drop', async (e) => {
+      if (e.defaultPrevented) return;
+      if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+      const file = e.dataTransfer.files[0];
+      const filePath = (file as any).path;
+      if (filePath && (filePath.endsWith('.html') || filePath.endsWith('.htm'))) {
+        e.preventDefault();
+        if (!this.deckPath) {
+          this.showToast('Please open or create a presentation first.');
+          return;
+        }
+        try {
+          const insertAfter = this.currentIndex;
+          const targetIndex = insertAfter >= 0 ? insertAfter + 1 : 0;
+          const updated = await window.electronAPI.addSlideFromHtmlFile(filePath, undefined, insertAfter);
+          if (updated) {
+            this.manifest = updated;
+            this.renderSidebarSlides();
+            this.goToSlide(targetIndex);
+            const newTitle = updated.slides[targetIndex]?.title || file.name;
+            this.showToast(`Added slide: "${newTitle}"`);
+          }
+        } catch (err: any) {
+          this.showToast(`Failed to add HTML slide: ${err.message}`);
+        }
+      }
     });
 
     window.electronAPI.onDeckLoadedEvent?.((res) => {
@@ -581,13 +651,11 @@ class PresentationApp {
   }
 
   private getActiveSlideDoc(): Document | null {
-    const frame = this.activeFrameIndex === 0 ? this.slideFrameEl : this.idleFrameEl;
-    return frame.contentDocument;
+    return this.slideFrameEl.contentDocument;
   }
 
   private getActiveSlideWindow(): Window | null {
-    const frame = this.activeFrameIndex === 0 ? this.slideFrameEl : this.idleFrameEl;
-    return frame.contentWindow;
+    return this.slideFrameEl.contentWindow;
   }
 
   private applyScroll(action: SlideScrollAction): void {
@@ -765,7 +833,8 @@ class PresentationApp {
         this.toggleWindowedPresentation();
       } else if (event.data.type === 'NEODECK_STEP_CHANGED') {
         this.currentAnimStep = event.data.currentStep || 0;
-        this.totalAnimSteps = event.data.totalSteps || 0;
+        this.totalAnimSteps = event.data.totalSteps || this.totalAnimSteps || 0;
+        console.log(`[NeoDeck] Animation step changed on slide ${this.currentIndex + 1}: step ${this.currentAnimStep}/${this.totalAnimSteps}`);
         this.syncPresenterState();
         window.electronAPI.syncSlideDom({
           type: 'slide:dom-sync',
@@ -1115,6 +1184,11 @@ class PresentationApp {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'm' || e.key === 'M')) {
       e.preventDefault();
       this.openNewSlideModal();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'h' || e.key === 'H')) {
+      e.preventDefault();
+      this.addSlideFromHtmlFileDirect();
       return;
     }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'e' || e.key === 'E')) {
@@ -1585,7 +1659,7 @@ class PresentationApp {
     const isForward = index >= previousIndex;
 
     this.currentAnimStep = 0;
-    this.totalAnimSteps = 0;
+    this.totalAnimSteps = (currentSlide.hasAnimations && currentSlide.animationSteps) ? currentSlide.animationSteps : 0;
 
     // Update Counter
     const total = this.manifest.slides.length;
@@ -1683,7 +1757,7 @@ class PresentationApp {
             } catch (_) {}
           } else {
             this.currentAnimStep = 0;
-            this.totalAnimSteps = 0;
+            this.totalAnimSteps = (currentSlide.hasAnimations && currentSlide.animationSteps) ? currentSlide.animationSteps : 0;
             this.syncPresenterState();
           }
         }
@@ -1786,7 +1860,7 @@ class PresentationApp {
           } catch (_) {}
         } else {
           this.currentAnimStep = 0;
-          this.totalAnimSteps = 0;
+          this.totalAnimSteps = (currentSlide.hasAnimations && currentSlide.animationSteps) ? currentSlide.animationSteps : 0;
           this.syncPresenterState();
         }
         this.updateSlideRect();
@@ -1817,6 +1891,7 @@ class PresentationApp {
         if (win && typeof win.nextAnimStep === 'function') {
           const advanced = win.nextAnimStep();
           if (advanced) {
+            console.log(`[NeoDeck] nextSlide(): Advanced animation step on slide ${this.currentIndex + 1} (${this.currentAnimStep}/${this.totalAnimSteps})`);
             return;
           }
         }
@@ -1830,11 +1905,17 @@ class PresentationApp {
         nextIdx++;
       }
       if (nextIdx < this.manifest.slides.length) {
+        console.log(`[NeoDeck] nextSlide(): Advancing from slide ${this.currentIndex + 1} to slide ${nextIdx + 1}`);
         this.goToSlide(nextIdx);
+      } else {
+        console.log(`[NeoDeck] nextSlide(): Already at last slide (${this.currentIndex + 1})`);
       }
     } else {
       if (this.currentIndex < this.manifest.slides.length - 1) {
+        console.log(`[NeoDeck] nextSlide(): Advancing from slide ${this.currentIndex + 1} to slide ${this.currentIndex + 2}`);
         this.goToSlide(this.currentIndex + 1);
+      } else {
+        console.log(`[NeoDeck] nextSlide(): Already at last slide (${this.currentIndex + 1})`);
       }
     }
   }
@@ -1847,6 +1928,7 @@ class PresentationApp {
         if (win && typeof win.prevAnimStep === 'function') {
           const rewound = win.prevAnimStep();
           if (rewound) {
+            console.log(`[NeoDeck] prevSlide(): Rewound animation step on slide ${this.currentIndex + 1} (${this.currentAnimStep}/${this.totalAnimSteps})`);
             return;
           }
         }
@@ -1860,11 +1942,17 @@ class PresentationApp {
         prevIdx--;
       }
       if (prevIdx >= 0) {
+        console.log(`[NeoDeck] prevSlide(): Going back from slide ${this.currentIndex + 1} to slide ${prevIdx + 1}`);
         this.goToSlide(prevIdx, false, true);
+      } else {
+        console.log(`[NeoDeck] prevSlide(): Already at first slide`);
       }
     } else {
       if (this.currentIndex > 0) {
+        console.log(`[NeoDeck] prevSlide(): Going back from slide ${this.currentIndex + 1} to slide ${this.currentIndex}`);
         this.goToSlide(this.currentIndex - 1, false, true);
+      } else {
+        console.log(`[NeoDeck] prevSlide(): Already at first slide`);
       }
     }
   }
@@ -2399,6 +2487,15 @@ class PresentationApp {
 
     modal.classList.remove('hidden');
 
+    // Reset HTML file selection state
+    this.selectedHtmlFilePath = null;
+    const emptyState = document.getElementById('dropzone-empty-state');
+    const selectedState = document.getElementById('dropzone-selected-state');
+    emptyState?.classList.remove('hidden');
+    selectedState?.classList.add('hidden');
+    const previewFrame = document.getElementById('html-file-preview-frame') as HTMLIFrameElement;
+    if (previewFrame) previewFrame.srcdoc = '';
+
     // Default title input based on current slide
     const inputTitle = document.getElementById('input-new-slide-title') as HTMLInputElement;
     if (inputTitle) {
@@ -2416,29 +2513,37 @@ class PresentationApp {
     modal?.classList.add('hidden');
   }
 
-  switchNewSlideTab(tab: 'deck' | 'standard'): void {
+  switchNewSlideTab(tab: 'deck' | 'standard' | 'html'): void {
     const tabDeck = document.getElementById('tab-template-deck');
     const tabStandard = document.getElementById('tab-template-standard');
+    const tabHtml = document.getElementById('tab-template-html');
     const viewDeck = document.getElementById('new-slide-deck-view');
     const viewStandard = document.getElementById('new-slide-standard-view');
+    const viewHtml = document.getElementById('new-slide-html-view');
+
+    tabDeck?.classList.toggle('active', tab === 'deck');
+    tabStandard?.classList.toggle('active', tab === 'standard');
+    tabHtml?.classList.toggle('active', tab === 'html');
+
+    viewDeck?.classList.toggle('hidden', tab !== 'deck');
+    viewStandard?.classList.toggle('hidden', tab !== 'standard');
+    viewHtml?.classList.toggle('hidden', tab !== 'html');
 
     if (tab === 'deck') {
-      tabDeck?.classList.add('active');
-      tabStandard?.classList.remove('active');
-      viewDeck?.classList.remove('hidden');
-      viewStandard?.classList.add('hidden');
       const activeCard = (viewDeck?.querySelector('.template-card.active') as HTMLElement) || (viewDeck?.querySelector('.template-card') as HTMLElement);
       if (activeCard) {
         this.selectTemplateCard(activeCard, 'from-deck', parseInt(activeCard.dataset.sourceIndex || '0', 10));
       }
-    } else {
-      tabStandard?.classList.add('active');
-      tabDeck?.classList.remove('active');
-      viewStandard?.classList.remove('hidden');
-      viewDeck?.classList.add('hidden');
+    } else if (tab === 'standard') {
       const activeCard = (viewStandard?.querySelector('.template-card.active') as HTMLElement) || (viewStandard?.querySelector('.template-card') as HTMLElement);
       if (activeCard) {
         this.selectTemplateCard(activeCard, activeCard.dataset.templateType || 'blank', -1);
+      }
+    } else if (tab === 'html') {
+      this.selectedTemplateType = 'from-html-file';
+      document.querySelectorAll('.template-card').forEach(c => c.classList.remove('active'));
+      if (this.selectedHtmlFilePath) {
+        this.updateHtmlPreviewScale();
       }
     }
   }
@@ -2593,6 +2698,33 @@ class PresentationApp {
 
     const targetIndex = insertAfter >= 0 ? insertAfter + 1 : 0;
 
+    if (this.selectedTemplateType === 'from-html-file') {
+      if (!this.selectedHtmlFilePath) {
+        await this.browseHtmlSlideFile();
+        if (!this.selectedHtmlFilePath) return;
+      }
+
+      this.closeNewSlideModal();
+
+      try {
+        const updatedManifest = await window.electronAPI.addSlideFromHtmlFile(
+          this.selectedHtmlFilePath,
+          title,
+          insertAfter
+        );
+
+        if (updatedManifest) {
+          this.manifest = updatedManifest;
+          this.renderSidebarSlides();
+          this.goToSlide(targetIndex);
+          this.showToast(`Added slide: "${title}" from HTML file`);
+        }
+      } catch (err: any) {
+        this.showToast(`Failed to add HTML slide: ${err.message}`);
+      }
+      return;
+    }
+
     this.closeNewSlideModal();
 
     const updatedManifest = await window.electronAPI.addSlideFromTemplate(
@@ -2607,6 +2739,102 @@ class PresentationApp {
       this.renderSidebarSlides();
       this.goToSlide(targetIndex);
       this.showToast(`Added slide: "${title}"`);
+    }
+  }
+
+  async browseHtmlSlideFile(): Promise<void> {
+    const filePath = await window.electronAPI.selectHtmlFileDialog();
+    if (filePath) {
+      await this.loadHtmlSlideFile(filePath);
+    }
+  }
+
+  async loadHtmlSlideFile(filePath: string): Promise<void> {
+    try {
+      const info = await window.electronAPI.inspectHtmlFile(filePath);
+      if (!info) return;
+
+      this.selectedHtmlFilePath = info.filePath;
+
+      // Update input title if empty or default
+      const inputTitle = document.getElementById('input-new-slide-title') as HTMLInputElement;
+      if (inputTitle && info.title) {
+        inputTitle.value = info.title;
+      }
+
+      // Update UI elements
+      const emptyState = document.getElementById('dropzone-empty-state');
+      const selectedState = document.getElementById('dropzone-selected-state');
+      emptyState?.classList.add('hidden');
+      selectedState?.classList.remove('hidden');
+
+      const labelName = document.getElementById('label-html-filename');
+      if (labelName) {
+        labelName.textContent = info.filePath.split(/[/\\]/).pop() || info.title;
+      }
+
+      const labelMeta = document.getElementById('label-html-meta');
+      if (labelMeta) {
+        const kb = (info.byteSize / 1024).toFixed(1);
+        labelMeta.textContent = `Size: ${kb} KB | Path: ${info.filePath}`;
+      }
+
+      const badgeAssets = document.getElementById('badge-html-assets');
+      badgeAssets?.classList.toggle('hidden', !info.hasAssets);
+
+      const badgeNotes = document.getElementById('badge-html-notes');
+      badgeNotes?.classList.toggle('hidden', !info.hasNotes);
+
+      const previewFrame = document.getElementById('html-file-preview-frame') as HTMLIFrameElement;
+      if (previewFrame) {
+        previewFrame.srcdoc = info.htmlContent;
+        this.updateHtmlPreviewScale();
+      }
+    } catch (err: any) {
+      this.showToast(`Error inspecting HTML file: ${err.message}`);
+    }
+  }
+
+  private updateHtmlPreviewScale(): void {
+    const wrapper = document.querySelector('.html-file-preview-wrapper') as HTMLElement;
+    const previewFrame = document.getElementById('html-file-preview-frame') as HTMLIFrameElement;
+    if (wrapper && previewFrame) {
+      const wrapW = wrapper.clientWidth || 500;
+      const scale = wrapW / 1920;
+      previewFrame.style.transform = `scale(${scale})`;
+    }
+  }
+
+  async addSlideFromHtmlFileDirect(insertAfterIndex?: number): Promise<void> {
+    if (!this.deckPath) {
+      alert('Please open or create a presentation first.');
+      return;
+    }
+
+    const filePath = await window.electronAPI.selectHtmlFileDialog();
+    if (!filePath) return;
+
+    const insertAfter = insertAfterIndex !== undefined && insertAfterIndex >= 0
+      ? insertAfterIndex
+      : this.currentIndex;
+    const targetIndex = insertAfter >= 0 ? insertAfter + 1 : 0;
+
+    try {
+      const updatedManifest = await window.electronAPI.addSlideFromHtmlFile(
+        filePath,
+        undefined,
+        insertAfter
+      );
+
+      if (updatedManifest) {
+        this.manifest = updatedManifest;
+        this.renderSidebarSlides();
+        this.goToSlide(targetIndex);
+        const newTitle = updatedManifest.slides[targetIndex]?.title || 'HTML Slide';
+        this.showToast(`Added slide: "${newTitle}"`);
+      }
+    } catch (err: any) {
+      this.showToast(`Failed to add HTML slide: ${err.message}`);
     }
   }
 
@@ -2671,7 +2899,7 @@ class PresentationApp {
     this.currentActiveElement = obj;
     this.renderSelectionOverlay(obj);
 
-    const activeFrame = this.activeFrameIndex === 0 ? this.slideFrameEl : this.idleFrameEl;
+    const activeFrame = this.slideFrameEl;
     const iframeRect = activeFrame.getBoundingClientRect();
     const scaleX = iframeRect.width / (activeFrame.offsetWidth || 1);
     const scaleY = iframeRect.height / (activeFrame.offsetHeight || 1);
@@ -2722,7 +2950,7 @@ class PresentationApp {
 
     this.currentActiveElement = null;
 
-    const activeFrame = this.activeFrameIndex === 0 ? this.slideFrameEl : this.idleFrameEl;
+    const activeFrame = this.slideFrameEl;
     const doc = activeFrame.contentDocument;
     doc?.getElementById('neo-selection-overlay')?.remove();
 

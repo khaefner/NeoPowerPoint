@@ -89,6 +89,7 @@
             <div class="dropdown-divider"></div>
             <button id="menu-new-deck">✨ New Presentation...</button>
             <button id="menu-new-slide">➕ Add New Slide... (Ctrl+M)</button>
+            <button id="menu-new-html-slide">📄 Add Slide from HTML File... (Ctrl+Shift+H)</button>
             <button id="menu-new-web-slide">🌐 Embed Web Page Slide...</button>
             <button id="menu-ai-designer">✨ AI Slide Designer...</button>
             <button id="menu-toggle-edit">✏️ Edit Slide (Ctrl+E)</button>
@@ -553,6 +554,10 @@
               <span>Standard Layouts</span>
               <span class="tab-count-badge">5</span>
             </button>
+            <button id="tab-template-html" class="segment-btn" data-tab="html">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="10 13 8 15 10 17"/><polyline points="14 13 16 15 14 17"/></svg>
+              <span>From HTML File</span>
+            </button>
           </div>
           <span style="font-size: 0.8rem; color: var(--text-muted);">Double-click a template to insert instantly</span>
         </div>
@@ -571,6 +576,42 @@
         <div id="new-slide-standard-view" class="template-grid-container hidden">
           <div id="new-slide-standard-grid" class="template-cards-grid">
             <!-- Standard layout cards -->
+          </div>
+        </div>
+
+        <!-- From HTML File View -->
+        <div id="new-slide-html-view" class="template-grid-container hidden">
+          <div id="html-file-dropzone" class="html-file-dropzone">
+            <div class="dropzone-empty" id="dropzone-empty-state">
+              <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="color: var(--accent-primary);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="10 13 8 15 10 17"/><polyline points="14 13 16 15 14 17"/></svg>
+              <h4 style="margin: 12px 0 6px; font-size: 1.1rem; color: #fff;">Import an Existing HTML Slide</h4>
+              <p style="margin: 0 0 18px; color: var(--text-muted); font-size: 0.88rem; max-width: 440px; text-align: center;">Choose an HTML file (.html, .htm) from your computer. Any linked images, stylesheets, scripts, and speaker notes will be packaged automatically.</p>
+              <button id="btn-browse-new-slide-html" type="button" class="btn btn-primary" style="padding: 9px 22px; font-weight: 600; font-size: 0.9rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                Browse HTML File...
+              </button>
+            </div>
+
+            <div class="dropzone-selected-container hidden" id="dropzone-selected-state">
+              <div class="html-file-info-bar">
+                <div class="html-file-details">
+                  <span class="html-file-icon">📄</span>
+                  <div style="display: flex; flex-direction: column; overflow: hidden;">
+                    <span id="label-html-filename" class="html-file-name">filename.html</span>
+                    <span id="label-html-meta" class="html-file-meta">Path: /... | Size: 0 KB</span>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
+                  <span id="badge-html-assets" class="html-badge-pill hidden">Assets Copied</span>
+                  <span id="badge-html-notes" class="html-badge-pill hidden">Notes Detected</span>
+                  <button id="btn-change-html-file" type="button" class="btn btn-secondary btn-sm">Change File...</button>
+                </div>
+              </div>
+
+              <div class="html-file-preview-wrapper">
+                <iframe id="html-file-preview-frame" class="html-file-preview-frame"></iframe>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -596,6 +637,10 @@
     <button id="ctx-duplicate" class="ctx-item">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       Duplicate Slide
+    </button>
+    <button id="ctx-new-html-slide" class="ctx-item">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+      Insert Slide from HTML File...
     </button>
     <button id="ctx-toggle-hide" class="ctx-item">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>

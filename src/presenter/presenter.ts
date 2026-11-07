@@ -210,6 +210,12 @@ function setupScaler(viewport: HTMLElement, scaler: HTMLElement) {
 setupScaler(currentViewportEl, currentScalerEl);
 setupScaler(nextViewportEl, nextScalerEl);
 
+nextViewportEl.addEventListener('click', () => {
+  window.presenterAPI.nextSlide();
+});
+nextViewportEl.style.cursor = 'pointer';
+nextViewportEl.title = 'Click to advance (Next slide / animation step)';
+
 // Notes Font Size
 btnNotesSmaller.addEventListener('click', () => {
   if (notesFontSize > 0.8) {
@@ -269,16 +275,6 @@ notesContentEl.addEventListener('click', (e: MouseEvent) => {
 // Navigation actions
 btnPrev.addEventListener('click', () => window.presenterAPI.prevSlide());
 btnNext.addEventListener('click', () => window.presenterAPI.nextSlide());
-
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
-    e.preventDefault();
-    window.presenterAPI.nextSlide();
-  } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-    e.preventDefault();
-    window.presenterAPI.prevSlide();
-  }
-});
 
 // State Sync from Main
 window.presenterAPI.onSyncState((state) => {
@@ -637,10 +633,10 @@ function setupPresenterKeyDownBridge(iframeDoc: Document): void {
       return;
     }
 
-    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown' || e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'n' || e.key === 'N') {
       e.preventDefault();
       window.presenterAPI.nextSlide();
-    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'Backspace' || e.key === 'ArrowUp' || e.key === 'p' || e.key === 'P') {
       e.preventDefault();
       window.presenterAPI.prevSlide();
     }
@@ -993,12 +989,14 @@ window.presenterAPI.onSlideFrame((frame) => {
 window.addEventListener('message', (event) => {
   if (!event.data) return;
   if (event.data.type === 'NEODECK_STEP_CHANGED') {
-    window.presenterAPI.sendInteraction({
-      type: 'slide:interaction',
-      slideIndex: currentState?.currentIndex ?? 0,
-      actionType: 'step',
-      step: event.data.currentStep
-    });
+    if (currentState && event.data.currentStep !== currentState.currentAnimStep) {
+      window.presenterAPI.sendInteraction({
+        type: 'slide:interaction',
+        slideIndex: currentState?.currentIndex ?? 0,
+        actionType: 'step',
+        step: event.data.currentStep
+      });
+    }
   }
 });
 
@@ -1016,10 +1014,10 @@ window.addEventListener('keydown', (e) => {
     // End Slide Show
     e.preventDefault();
     window.presenterAPI.endSlideShow().catch(() => {});
-  } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+  } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'n' || e.key === 'N') {
     e.preventDefault();
     window.presenterAPI.nextSlide();
-  } else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'Backspace') {
+  } else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'Backspace' || e.key === 'ArrowUp' || e.key === 'p' || e.key === 'P') {
     e.preventDefault();
     window.presenterAPI.prevSlide();
   } else if (e.key === 'Home') {

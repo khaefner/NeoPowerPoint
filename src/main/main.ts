@@ -95,7 +95,7 @@ const MIN_CAPTURE_INTERVAL_MS = 160; // Max ~6 FPS to protect system RAM and mat
 let lastCaptureTime = 0;
 
 function hasCaptureConsumer(): boolean {
-  return syncServer.getConnectedClientCount() > 0;
+  return syncServer.getConnectedClientCount() > 0 || (presenterWindow !== null && !presenterWindow.isDestroyed());
 }
 
 async function captureAndBroadcastSlide(force: boolean = false): Promise<void> {
@@ -523,6 +523,15 @@ function buildAppMenu(): void {
           }
         },
         {
+          label: 'Add Slide from HTML File...',
+          accelerator: 'CmdOrCtrl+Shift+H',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('menu:new-html-slide');
+            }
+          }
+        },
+        {
           label: 'New Presentation...',
           accelerator: 'CmdOrCtrl+N',
           click: async () => {
@@ -612,6 +621,21 @@ function buildAppMenu(): void {
     {
       label: 'Slide',
       submenu: [
+        {
+          label: 'New Slide from Template...',
+          accelerator: 'CmdOrCtrl+M',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send('menu:new-slide');
+          }
+        },
+        {
+          label: 'Add Slide from HTML File...',
+          accelerator: 'CmdOrCtrl+Shift+H',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send('menu:new-html-slide');
+          }
+        },
+        { type: 'separator' },
         {
           label: 'Next Slide',
           accelerator: 'Right',
@@ -799,9 +823,27 @@ async function handleImportPptx() {
   }
 }
 
+async function handleSelectHtmlFile(): Promise<string | null> {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select HTML Slide File',
+    filters: [
+      { name: 'HTML Files (*.html, *.htm)', extensions: ['html', 'htm'] },
+      { name: 'All Files', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+}
+
 // IPC Handlers
 ipcMain.handle('dialog:open-folder', async () => handleOpenFolder());
 ipcMain.handle('dialog:open-package', async () => handleOpenPackage());
+ipcMain.handle('dialog:select-html-file', async () => handleSelectHtmlFile());
 ipcMain.handle('dialog:import-pptx', async () => handleImportPptx());
 ipcMain.handle('dialog:export-package', async () => handleExportPackage());
 ipcMain.handle('dialog:create-deck', async () => handleCreateDeck());
@@ -919,6 +961,16 @@ ipcMain.handle('deck:add-slide-from-template', async (_, title: string, template
   const activePath = deckService.getActiveDeckPath();
   if (!activePath) return null;
   return deckService.addSlideFromTemplate(activePath, title, templateType as any, sourceSlideIndex, insertAfterIndex);
+});
+
+ipcMain.handle('deck:inspect-html-file', async (_, sourceFilePath: string) => {
+  return deckService.inspectHtmlFile(sourceFilePath);
+});
+
+ipcMain.handle('deck:add-slide-from-html-file', async (_, sourceFilePath: string, title?: string, insertAfterIndex?: number) => {
+  const activePath = deckService.getActiveDeckPath();
+  if (!activePath) return null;
+  return deckService.addSlideFromHtmlFile(activePath, sourceFilePath, title, insertAfterIndex);
 });
 
 ipcMain.handle('deck:add-web-slide', async (_, title: string, url: string, insertAfterIndex?: number) => {
@@ -1115,18 +1167,21 @@ ipcMain.handle('adb:launch-tablet', async (_, deviceId?: string) => {
 });
 
 ipcMain.on('presenter:navigate', (_, index: number) => {
+  logger.info('PresenterNav', `Received presenter:navigate to slide index ${index}`);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('slide:navigate', index);
   }
 });
 
 ipcMain.on('presenter:next', () => {
+  logger.info('PresenterNav', `Received presenter:next request`);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('slide:navigate', 'next');
   }
 });
 
 ipcMain.on('presenter:prev', () => {
+  logger.info('PresenterNav', `Received presenter:prev request`);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('slide:navigate', 'prev');
   }
