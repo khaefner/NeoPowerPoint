@@ -5,3 +5,5 @@ test-output/
 *_NeoDeck/
 *.log
 .DS_Store
+__pycache__/
+*.pyc

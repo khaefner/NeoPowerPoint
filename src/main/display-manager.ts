@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { logger } from './logger';
+import { getAugmentedEnv, resolvePythonCommand } from './python-resolver';
 
 const execAsync = promisify(exec);
 
@@ -16,6 +17,21 @@ export interface LinuxOutputInfo {
   height?: number;
   x?: number;
   y?: number;
+}
+
+export interface MacOSDisplayUnitInfo {
+  id?: number;
+  name?: string;
+  isMain: boolean;
+  isBuiltin: boolean;
+  isInMirrorSet: boolean;
+  mirrorsDisplay?: number;
+}
+
+export interface MacOSOutputsInfo {
+  connectedCount: number;
+  isMirrored: boolean;
+  displays: MacOSDisplayUnitInfo[];
 }
 
 export interface DisplayStateInfo {
@@ -30,6 +46,7 @@ export interface DisplayStateInfo {
     secondary?: string;
     isMirrored: boolean;
   };
+  macOutputs?: MacOSOutputsInfo;
 }
 
 export class DisplayManager {
@@ -114,6 +131,102 @@ export class DisplayManager {
   }
 
   /**
+   * Parse macOS `system_profiler SPDisplaysDataType -json` stdout to identify connected
+   * displays and whether hardware screen mirroring is active.
+   * Exposed as a static method for deterministic unit testing.
+   */
+  public static parseSystemProfilerDisplays(stdout: string): MacOSOutputsInfo {
+    try {
+      const parsed = JSON.parse(stdout);
+      const gpus = Array.isArray(parsed?.SPDisplaysDataType) ? parsed.SPDisplaysDataType : [];
+      const displays: MacOSDisplayUnitInfo[] = [];
+
+      for (const gpu of gpus) {
+        const ndrvs = Array.isArray(gpu?.spdisplays_ndrvs) ? gpu.spdisplays_ndrvs : [];
+        for (const d of ndrvs) {
+          const onlineRaw = String(d?.spdisplays_online || 'spdisplays_true').toLowerCase();
+          if (onlineRaw === 'spdisplays_false' || onlineRaw === 'no' || onlineRaw === 'false') {
+            continue;
+          }
+          const mirrorRaw = String(d?.spdisplays_mirror || '').toLowerCase();
+          const isInMirrorSet = mirrorRaw === 'spdisplays_on' || mirrorRaw === 'on' || mirrorRaw === 'yes' || mirrorRaw === 'true';
+          const mainRaw = String(d?.spdisplays_main || '').toLowerCase();
+          const isMain = mainRaw === 'spdisplays_yes' || mainRaw === 'yes' || mainRaw === 'true';
+          const connRaw = String(d?.spdisplays_connection_type || '').toLowerCase();
+          const nameRaw = String(d?._name || '');
+          const isBuiltin = connRaw.includes('internal') || /built-in|retina|color lcd/i.test(nameRaw);
+
+          displays.push({
+            name: nameRaw || undefined,
+            isMain,
+            isBuiltin,
+            isInMirrorSet
+          });
+        }
+      }
+
+      const isMirrored = displays.length > 1 && displays.some(d => d.isInMirrorSet);
+      return {
+        connectedCount: displays.length,
+        isMirrored,
+        displays
+      };
+    } catch (_) {
+      return {
+        connectedCount: 0,
+        isMirrored: false,
+        displays: []
+      };
+    }
+  }
+
+  /**
+   * Selects which display should show Presenter View vs Audience Slide Show.
+   * Prefers the Mac's built-in internal display (`d.internal === true`) for Presenter View
+   * and the external projector/monitor (`d.internal === false`) for the Audience Slide Show,
+   * even if the OS placed the primary (0,0) origin on the external projector.
+   */
+  public static selectPresenterAndAudienceDisplays(
+    displays: Display[],
+    primaryDisplay: Display,
+    isSwapped: boolean
+  ): {
+    hasSecondary: boolean;
+    presenterDisplay: Display;
+    audienceDisplay: Display;
+    secondaryDisplay?: Display;
+  } {
+    const nonOverlapping = displays.filter(d =>
+      d.id === primaryDisplay.id ||
+      Math.abs(d.bounds.x - primaryDisplay.bounds.x) >= 5 ||
+      Math.abs(d.bounds.y - primaryDisplay.bounds.y) >= 5
+    );
+
+    if (nonOverlapping.length < 2) {
+      return {
+        hasSecondary: false,
+        presenterDisplay: primaryDisplay,
+        audienceDisplay: primaryDisplay
+      };
+    }
+
+    const internalDisplay = nonOverlapping.find(d => (d as any).internal === true);
+    const externalDisplay = nonOverlapping.find(d => (d as any).internal === false && d.id !== internalDisplay?.id);
+
+    const basePresenter = (internalDisplay && externalDisplay) ? internalDisplay : primaryDisplay;
+    const baseAudience = (internalDisplay && externalDisplay)
+      ? externalDisplay
+      : (nonOverlapping.find(d => d.id !== basePresenter.id) || nonOverlapping[1]);
+
+    return {
+      hasSecondary: true,
+      presenterDisplay: isSwapped ? baseAudience : basePresenter,
+      audienceDisplay: isSwapped ? basePresenter : baseAudience,
+      secondaryDisplay: baseAudience
+    };
+  }
+
+  /**
    * Queries xrandr on Linux to detect connected monitors and mirrored configurations.
    */
   public async queryXrandr(): Promise<{
@@ -122,7 +235,7 @@ export class DisplayManager {
     secondary?: string;
     isMirrored: boolean;
   }> {
-    const { stdout } = await execAsync('xrandr --query');
+    const { stdout } = await execAsync('xrandr --query', { env: getAugmentedEnv() });
     const parsed = DisplayManager.parseXrandrQuery(stdout);
     return {
       connectedCount: parsed.connectedOutputs.length,
@@ -133,13 +246,95 @@ export class DisplayManager {
   }
 
   /**
+   * Queries macOS CoreGraphics / system_profiler to detect hardware-mirrored projectors/monitors.
+   * When macOS mirrors two screens, Electron's `screen.getAllDisplays()` collapses them into a single
+   * logical NSScreen, so querying CoreGraphics / system_profiler is required to see both physical displays.
+   */
+  public async queryMacOSDisplays(): Promise<MacOSOutputsInfo> {
+    const env = getAugmentedEnv();
+
+    // 1. Fast CoreGraphics query via Python3 ctypes (~25ms, no Xcode CLT required)
+    const pyScript = [
+      'import ctypes, json',
+      "cg = ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')",
+      'cnt = ctypes.c_uint32(0)',
+      'cg.CGGetOnlineDisplayList(0, None, ctypes.byref(cnt))',
+      'n = cnt.value',
+      'ids = (ctypes.c_uint32 * max(n, 1))()',
+      'cg.CGGetOnlineDisplayList(n, ids, ctypes.byref(cnt))',
+      'main_id = int(cg.CGMainDisplayID())',
+      'out = []',
+      'for i in range(cnt.value):',
+      '    d = int(ids[i])',
+      '    m = int(cg.CGDisplayMirrorsDisplay(d))',
+      '    in_m = bool(cg.CGDisplayIsInMirrorSet(d)) or (m != 0)',
+      '    out.append({"id": d, "isMain": d == main_id, "isBuiltin": bool(cg.CGDisplayIsBuiltin(d)), "isInMirrorSet": in_m, "mirrorsDisplay": m})',
+      'print(json.dumps({"connectedCount": len(out), "isMirrored": len(out) > 1 and any(x["isInMirrorSet"] for x in out), "displays": out}))'
+    ].join('\n');
+
+    const pyCandidates: string[] = [];
+    try {
+      pyCandidates.push(resolvePythonCommand().command);
+    } catch (_) {}
+    for (const fallback of ['/usr/bin/python3', '/opt/homebrew/bin/python3', '/usr/local/bin/python3', 'python3']) {
+      if (!pyCandidates.includes(fallback)) pyCandidates.push(fallback);
+    }
+
+    for (const pyCmd of pyCandidates) {
+      try {
+        const { stdout } = await execAsync(`"${pyCmd}" -c ${JSON.stringify(pyScript)}`, { env, timeout: 3000 });
+        const parsed = JSON.parse(stdout.trim());
+        if (typeof parsed?.connectedCount === 'number' && parsed.connectedCount > 0) {
+          return parsed as MacOSOutputsInfo;
+        }
+      } catch (_) {}
+    }
+
+    // 2. Fallback to built-in `/usr/sbin/system_profiler SPDisplaysDataType -json`
+    try {
+      const { stdout } = await execAsync('/usr/sbin/system_profiler SPDisplaysDataType -json', { env, timeout: 5000 });
+      const parsed = DisplayManager.parseSystemProfilerDisplays(stdout);
+      if (parsed.connectedCount > 0) {
+        return parsed;
+      }
+    } catch (err) {
+      logger.debug('DisplayManager', `macOS system_profiler query failed: ${err}`);
+    }
+
+    return {
+      connectedCount: screen.getAllDisplays().length,
+      isMirrored: false,
+      displays: []
+    };
+  }
+
+  /**
+   * Waits for Electron's screen module to report at least 2 non-overlapping displays after un-mirroring.
+   */
+  private async waitForExtendedDisplays(timeoutMs = 2500): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const displays = screen.getAllDisplays();
+      const primary = screen.getPrimaryDisplay();
+      const sel = DisplayManager.selectPresenterAndAudienceDisplays(displays, primary, false);
+      if (sel.hasSecondary) {
+        logger.info('DisplayManager', `Extended displays active after ${Date.now() - start}ms (${displays.length} displays detected)`);
+        return true;
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+    logger.warn('DisplayManager', `Timed out after ${timeoutMs}ms waiting for extended display bounds from Electron screen API`);
+    return false;
+  }
+
+  /**
    * Detects if multiple displays are connected and whether they are mirrored.
    */
   public async detectDisplayState(): Promise<DisplayStateInfo> {
     const displays = screen.getAllDisplays();
     const primaryDisplay = screen.getPrimaryDisplay();
-    let secondaryDisplay = displays.find(d => d.id !== primaryDisplay.id &&
-      (d.bounds.x !== primaryDisplay.bounds.x || d.bounds.y !== primaryDisplay.bounds.y));
+    const selection = DisplayManager.selectPresenterAndAudienceDisplays(displays, primaryDisplay, false);
+    const secondaryDisplay = selection.secondaryDisplay;
 
     // Check if Electron reports multiple displays that share coordinates (mirrored/cloned)
     let isMirrored = false;
@@ -150,6 +345,8 @@ export class DisplayManager {
     }
 
     let linuxOutputs: { connectedCount: number; primary?: string; secondary?: string; isMirrored: boolean } | undefined;
+    let macOutputs: MacOSOutputsInfo | undefined;
+
     if (process.platform === 'linux') {
       try {
         const xrandrInfo = await this.queryXrandr();
@@ -160,9 +357,21 @@ export class DisplayManager {
       } catch (err) {
         logger.debug('DisplayManager', `xrandr query skipped or unavailable: ${err}`);
       }
+    } else if (process.platform === 'darwin') {
+      try {
+        macOutputs = await this.queryMacOSDisplays();
+        if (macOutputs.isMirrored || (macOutputs.connectedCount > 1 && displays.length === 1)) {
+          isMirrored = true;
+        }
+      } catch (err) {
+        logger.debug('DisplayManager', `macOS display query skipped or unavailable: ${err}`);
+      }
     }
 
-    const hasMultipleDisplays = displays.length > 1 || (linuxOutputs && linuxOutputs.connectedCount > 1);
+    const hasMultipleDisplays =
+      displays.length > 1 ||
+      (linuxOutputs !== undefined && linuxOutputs.connectedCount > 1) ||
+      (macOutputs !== undefined && macOutputs.connectedCount > 1);
 
     return {
       hasMultipleDisplays: !!hasMultipleDisplays,
@@ -170,7 +379,8 @@ export class DisplayManager {
       displays,
       primaryDisplay,
       secondaryDisplay,
-      linuxOutputs
+      linuxOutputs,
+      macOutputs
     };
   }
 
@@ -190,7 +400,14 @@ export class DisplayManager {
       hasMultiple: state.hasMultipleDisplays,
       isMirrored: state.isMirrored,
       electronDisplayCount: state.displays.length,
-      linuxOutputs: state.linuxOutputs
+      electronDisplays: state.displays.map(d => ({
+        id: d.id,
+        label: (d as any).label,
+        internal: (d as any).internal,
+        bounds: d.bounds
+      })),
+      linuxOutputs: state.linuxOutputs,
+      macOutputs: state.macOutputs
     })}`);
 
     if (!state.isMirrored) {
@@ -198,20 +415,21 @@ export class DisplayManager {
       return false;
     }
 
+    const env = getAugmentedEnv();
+
     // Auto-extend mirrored displays on Linux (X11)
     if (process.platform === 'linux' && state.linuxOutputs?.secondary && state.linuxOutputs?.primary) {
       try {
         const { primary, secondary } = state.linuxOutputs;
         logger.info('DisplayManager', `Linux: Auto-extending external display ${secondary} to the right of ${primary}`);
-        await execAsync(`xrandr --output "${secondary}" --right-of "${primary}" --auto`);
+        await execAsync(`xrandr --output "${secondary}" --right-of "${primary}" --auto`, { env });
         this.wasAutoExtended = true;
         this.originalLinuxConfig = {
           primaryOutput: primary,
           secondaryOutput: secondary,
           wasMirrored: true
         };
-        // Give X11 and Electron screen manager time to register the layout geometry
-        await new Promise(r => setTimeout(r, 450));
+        await this.waitForExtendedDisplays(2000);
         return true;
       } catch (err) {
         logger.warn('DisplayManager', `Failed to un-mirror display via xrandr: ${err}`);
@@ -219,10 +437,10 @@ export class DisplayManager {
     } else if (process.platform === 'win32') {
       try {
         logger.info('DisplayManager', 'Windows: Auto-extending display via displayswitch.exe /extend');
-        await execAsync('displayswitch.exe /extend');
+        await execAsync('displayswitch.exe /extend', { env });
         this.wasAutoExtended = true;
         this.originalWindowsMirrored = true;
-        await new Promise(r => setTimeout(r, 500));
+        await this.waitForExtendedDisplays(2000);
         return true;
       } catch (err) {
         logger.warn('DisplayManager', `Failed to un-mirror display via displayswitch: ${err}`);
@@ -233,7 +451,7 @@ export class DisplayManager {
         if (unmirrored) {
           this.wasAutoExtended = true;
           this.originalMacOSMirrored = true;
-          await new Promise(r => setTimeout(r, 500));
+          await this.waitForExtendedDisplays(2500);
           return true;
         }
       } catch (err) {
@@ -245,24 +463,67 @@ export class DisplayManager {
   }
 
   /**
-   * Attempts to un-mirror external displays on macOS using CoreGraphics via Swift or installed CLI utilities.
+   * Attempts to un-mirror external displays on macOS using CoreGraphics (via Python3 ctypes or Swift) or CLI utilities.
    */
   private async unmirrorMacOS(): Promise<boolean> {
+    const env = getAugmentedEnv();
+
     // 1. Check if 'betterdisplaycli' is available
     try {
-      await execAsync('betterdisplaycli set -mirroring=off');
+      await execAsync('betterdisplaycli set -mirroring=off', { env, timeout: 3000 });
       logger.info('DisplayManager', 'macOS: Un-mirrored displays via betterdisplaycli');
       return true;
     } catch (_) {}
 
     // 2. Check if 'mirror' CLI tool is available
     try {
-      await execAsync('mirror -off');
+      await execAsync('mirror -off', { env, timeout: 3000 });
       logger.info('DisplayManager', 'macOS: Un-mirrored displays via mirror CLI');
       return true;
     } catch (_) {}
 
-    // 3. Execute CoreGraphics display configuration via Swift
+    // 3. Execute CoreGraphics display configuration via Python3 ctypes (fast, no Xcode CLT needed)
+    // Pass kCGNullDirectDisplay (0) for every display currently mirroring another display
+    // (handles both cases: projector mirroring Mac OR Mac mirroring projector).
+    const pyUnmirrorScript = [
+      'import ctypes',
+      "cg = ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')",
+      'cnt = ctypes.c_uint32(0)',
+      'cg.CGGetOnlineDisplayList(0, None, ctypes.byref(cnt))',
+      'if cnt.value > 1:',
+      '    ids = (ctypes.c_uint32 * cnt.value)()',
+      '    cg.CGGetOnlineDisplayList(cnt.value, ids, ctypes.byref(cnt))',
+      '    cfg = ctypes.c_void_p()',
+      '    if cg.CGBeginDisplayConfiguration(ctypes.byref(cfg)) == 0:',
+      '        for i in range(cnt.value):',
+      '            d = ids[i]',
+      '            if cg.CGDisplayMirrorsDisplay(d) != 0 or not cg.CGDisplayIsBuiltin(d):',
+      '                cg.CGConfigureDisplayMirrorOfDisplay(cfg, d, ctypes.c_uint32(0))',
+      '        if cg.CGCompleteDisplayConfiguration(cfg, ctypes.c_uint32(1)) == 0:',
+      '            print("OK")'
+    ].join('\n');
+
+    const pyCandidates: string[] = [];
+    try {
+      pyCandidates.push(resolvePythonCommand().command);
+    } catch (_) {}
+    for (const fallback of ['/usr/bin/python3', '/opt/homebrew/bin/python3', '/usr/local/bin/python3', 'python3']) {
+      if (!pyCandidates.includes(fallback)) pyCandidates.push(fallback);
+    }
+
+    for (const pyCmd of pyCandidates) {
+      try {
+        const { stdout } = await execAsync(`"${pyCmd}" -c ${JSON.stringify(pyUnmirrorScript)}`, { env, timeout: 4000 });
+        if (stdout.includes('OK')) {
+          logger.info('DisplayManager', `macOS: Un-mirrored displays via CoreGraphics (${pyCmd})`);
+          return true;
+        }
+      } catch (err) {
+        logger.debug('DisplayManager', `macOS Python CoreGraphics unmirror attempt (${pyCmd}) failed: ${err}`);
+      }
+    }
+
+    // 4. Fallback: Execute CoreGraphics display configuration via Swift
     try {
       const swiftScript = `
 import CoreGraphics
@@ -274,8 +535,10 @@ if CGBeginDisplayConfiguration(&config) == .success, let c = config {
         var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
         CGGetOnlineDisplayList(count, &displays, &count)
         let main = CGMainDisplayID()
-        for d in displays where d != main {
-            CGConfigureDisplayMirrorOfDisplay(c, d, kCGNullDirectDisplay)
+        for d in displays {
+            if CGDisplayMirrorsDisplay(d) != kCGNullDirectDisplay || d != main {
+                CGConfigureDisplayMirrorOfDisplay(c, d, kCGNullDirectDisplay)
+            }
         }
         CGCompleteDisplayConfiguration(c, .forSession)
         print("OK")
@@ -284,7 +547,7 @@ if CGBeginDisplayConfiguration(&config) == .success, let c = config {
 `;
       const tempPath = path.join(os.tmpdir(), `neopres_unmirror_${Date.now()}.swift`);
       await fs.promises.writeFile(tempPath, swiftScript);
-      const { stdout } = await execAsync(`/usr/bin/swift "${tempPath}"`);
+      const { stdout } = await execAsync(`/usr/bin/swift "${tempPath}"`, { env, timeout: 8000 });
       await fs.promises.unlink(tempPath).catch(() => {});
       if (stdout.includes('OK')) {
         logger.info('DisplayManager', 'macOS: Un-mirrored displays via CoreGraphics Swift script');
@@ -301,15 +564,56 @@ if CGBeginDisplayConfiguration(&config) == .success, let c = config {
    * Restores display mirroring on macOS.
    */
   private async mirrorMacOS(): Promise<void> {
+    const env = getAugmentedEnv();
+
     try {
-      await execAsync('betterdisplaycli set -mirroring=on');
+      await execAsync('betterdisplaycli set -mirroring=on', { env, timeout: 3000 });
       return;
     } catch (_) {}
 
     try {
-      await execAsync('mirror -on');
+      await execAsync('mirror -on', { env, timeout: 3000 });
       return;
     } catch (_) {}
+
+    const pyMirrorScript = [
+      'import ctypes',
+      "cg = ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')",
+      'cnt = ctypes.c_uint32(0)',
+      'cg.CGGetOnlineDisplayList(0, None, ctypes.byref(cnt))',
+      'if cnt.value > 1:',
+      '    ids = (ctypes.c_uint32 * cnt.value)()',
+      '    cg.CGGetOnlineDisplayList(cnt.value, ids, ctypes.byref(cnt))',
+      '    main_id = cg.CGMainDisplayID()',
+      '    for i in range(cnt.value):',
+      '        if cg.CGDisplayIsBuiltin(ids[i]):',
+      '            main_id = ids[i]',
+      '            break',
+      '    cfg = ctypes.c_void_p()',
+      '    if cg.CGBeginDisplayConfiguration(ctypes.byref(cfg)) == 0:',
+      '        for i in range(cnt.value):',
+      '            if ids[i] != main_id:',
+      '                cg.CGConfigureDisplayMirrorOfDisplay(cfg, ids[i], main_id)',
+      '        if cg.CGCompleteDisplayConfiguration(cfg, ctypes.c_uint32(1)) == 0:',
+      '            print("OK")'
+    ].join('\n');
+
+    const pyCandidates: string[] = [];
+    try {
+      pyCandidates.push(resolvePythonCommand().command);
+    } catch (_) {}
+    for (const fallback of ['/usr/bin/python3', '/opt/homebrew/bin/python3', '/usr/local/bin/python3', 'python3']) {
+      if (!pyCandidates.includes(fallback)) pyCandidates.push(fallback);
+    }
+
+    for (const pyCmd of pyCandidates) {
+      try {
+        const { stdout } = await execAsync(`"${pyCmd}" -c ${JSON.stringify(pyMirrorScript)}`, { env, timeout: 4000 });
+        if (stdout.includes('OK')) {
+          return;
+        }
+      } catch (_) {}
+    }
 
     try {
       const swiftScript = `
@@ -331,7 +635,7 @@ if CGBeginDisplayConfiguration(&config) == .success, let c = config {
 `;
       const tempPath = path.join(os.tmpdir(), `neopres_mirror_${Date.now()}.swift`);
       await fs.promises.writeFile(tempPath, swiftScript);
-      await execAsync(`/usr/bin/swift "${tempPath}"`);
+      await execAsync(`/usr/bin/swift "${tempPath}"`, { env, timeout: 8000 });
       await fs.promises.unlink(tempPath).catch(() => {});
     } catch (err) {
       logger.warn('DisplayManager', `macOS CoreGraphics mirror restoration failed: ${err}`);
@@ -346,11 +650,12 @@ if CGBeginDisplayConfiguration(&config) == .success, let c = config {
 
     logger.info('DisplayManager', 'Restoring original mirrored display configuration...');
     this.wasAutoExtended = false;
+    const env = getAugmentedEnv();
 
     if (process.platform === 'linux' && this.originalLinuxConfig) {
       try {
         const { primaryOutput, secondaryOutput } = this.originalLinuxConfig;
-        await execAsync(`xrandr --output "${secondaryOutput}" --same-as "${primaryOutput}"`);
+        await execAsync(`xrandr --output "${secondaryOutput}" --same-as "${primaryOutput}"`, { env });
         logger.info('DisplayManager', `Restored ${secondaryOutput} mirrored with ${primaryOutput}`);
       } catch (err) {
         logger.warn('DisplayManager', `Failed to restore xrandr mirroring: ${err}`);
@@ -359,7 +664,7 @@ if CGBeginDisplayConfiguration(&config) == .success, let c = config {
       }
     } else if (process.platform === 'win32' && this.originalWindowsMirrored) {
       try {
-        await execAsync('displayswitch.exe /clone');
+        await execAsync('displayswitch.exe /clone', { env });
         logger.info('DisplayManager', 'Restored Windows display mirroring (displayswitch.exe /clone)');
       } catch (err) {
         logger.warn('DisplayManager', `Failed to restore Windows display clone: ${err}`);
@@ -384,29 +689,34 @@ if CGBeginDisplayConfiguration(&config) == .success, let c = config {
   public arrangeWindows(mainWindow: BrowserWindow, presenterWindow: BrowserWindow | null): void {
     const displays = screen.getAllDisplays();
     const primaryDisplay = screen.getPrimaryDisplay();
-    // Non-overlapping secondary display
-    const secondaryDisplay = displays.find(d => d.id !== primaryDisplay.id &&
-      (d.bounds.x !== primaryDisplay.bounds.x || d.bounds.y !== primaryDisplay.bounds.y));
+    const selection = DisplayManager.selectPresenterAndAudienceDisplays(displays, primaryDisplay, this.isSwapped);
 
-    if (secondaryDisplay) {
+    if (selection.hasSecondary) {
       // Dual/Extended Display Setup
-      const audienceDisplay = this.isSwapped ? primaryDisplay : secondaryDisplay;
-      const presenterDisplay = this.isSwapped ? secondaryDisplay : primaryDisplay;
+      const { audienceDisplay, presenterDisplay } = selection;
 
-      logger.info('DisplayManager', `Dual display: Audience window -> display ${audienceDisplay.id} (${audienceDisplay.bounds.width}x${audienceDisplay.bounds.height} at +${audienceDisplay.bounds.x}+${audienceDisplay.bounds.y}), Presenter window -> display ${presenterDisplay.id}`);
+      logger.info('DisplayManager', `Dual display: Audience window -> display ${audienceDisplay.id} (${audienceDisplay.bounds.width}x${audienceDisplay.bounds.height} at +${audienceDisplay.bounds.x}+${audienceDisplay.bounds.y}, internal=${(audienceDisplay as any).internal}), Presenter window -> display ${presenterDisplay.id} (${presenterDisplay.bounds.width}x${presenterDisplay.bounds.height} at +${presenterDisplay.bounds.x}+${presenterDisplay.bounds.y}, internal=${(presenterDisplay as any).internal})`);
 
-      mainWindow.setFullScreen(false);
+      if (mainWindow.isFullScreen()) {
+        mainWindow.setFullScreen(false);
+      }
       mainWindow.setBounds(audienceDisplay.bounds);
       mainWindow.setFullScreen(true);
       mainWindow.webContents.send('deck:set-presentation-mode', true);
 
       if (presenterWindow && !presenterWindow.isDestroyed()) {
+        if (process.platform === 'darwin') {
+          try {
+            presenterWindow.setVisibleOnAllWorkspaces(false);
+          } catch (_) {}
+        }
         presenterWindow.setBounds({
           x: presenterDisplay.bounds.x + 40,
           y: presenterDisplay.bounds.y + 40,
           width: Math.min(1150, presenterDisplay.bounds.width - 80),
           height: Math.min(780, presenterDisplay.bounds.height - 80)
         });
+        presenterWindow.show();
         presenterWindow.focus();
       }
     } else {
@@ -415,21 +725,33 @@ if CGBeginDisplayConfiguration(&config) == .success, let c = config {
 
       if (this.isSwapped) {
         // Presentation in front full-screen
+        if (presenterWindow && !presenterWindow.isDestroyed() && process.platform === 'darwin') {
+          try {
+            presenterWindow.setVisibleOnAllWorkspaces(false);
+          } catch (_) {}
+        }
         mainWindow.setFullScreen(true);
         mainWindow.webContents.send('deck:set-presentation-mode', true);
         mainWindow.focus();
       } else {
-        // Presenter view in front
+        // Presenter view in front (keep visible above macOS Fullscreen Space if single/mirrored)
         mainWindow.setFullScreen(true);
         mainWindow.webContents.send('deck:set-presentation-mode', true);
 
         if (presenterWindow && !presenterWindow.isDestroyed()) {
+          if (process.platform === 'darwin') {
+            try {
+              presenterWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+            } catch (_) {}
+          }
           presenterWindow.setBounds({
             x: primaryDisplay.bounds.x + 30,
             y: primaryDisplay.bounds.y + 30,
             width: Math.min(1150, primaryDisplay.bounds.width - 60),
             height: Math.min(780, primaryDisplay.bounds.height - 60)
           });
+          presenterWindow.show();
+          presenterWindow.moveTop();
           presenterWindow.focus();
         }
       }

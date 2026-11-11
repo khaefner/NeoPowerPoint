@@ -12,7 +12,7 @@ import { SyncServer } from './sync-server';
 import { InkStore } from './ink-store';
 import { InkSyncAction, SlideScrollAction, SlideDomSyncAction, SlideInteractionAction } from '../types/ink';
 import { logger } from './logger';
-import { displayManager } from './display-manager';
+import { displayManager, DisplayManager } from './display-manager';
 
 process.on('uncaughtException', (err) => {
   logger.error('MainProcess', 'Uncaught Exception', err);
@@ -344,30 +344,19 @@ async function openPresenterWindow(): Promise<boolean> {
     logger.warn('MainProcess', `Display auto-extend attempt encountered error: ${err}`);
   }
 
-  // Find displays
+  // Find displays (preferring internal Mac display for Presenter View and external projector/monitor for Audience)
   const displays = screen.getAllDisplays();
   const primaryDisplay = screen.getPrimaryDisplay();
-  const secondaryDisplay = displays.find(d => d.id !== primaryDisplay.id &&
-    (d.bounds.x !== primaryDisplay.bounds.x || d.bounds.y !== primaryDisplay.bounds.y));
-
   const isSwapped = displayManager.getIsSwapped();
-  const audienceDisplay = secondaryDisplay ? (isSwapped ? primaryDisplay : secondaryDisplay) : primaryDisplay;
-  const presenterDisplay = secondaryDisplay ? (isSwapped ? secondaryDisplay : primaryDisplay) : primaryDisplay;
-
-  // Automatically put audience presentation window into Fullscreen on audienceDisplay
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setFullScreen(false);
-    mainWindow.setBounds(audienceDisplay.bounds);
-    mainWindow.setFullScreen(true);
-    mainWindow.webContents.send('deck:set-presentation-mode', true);
-  }
+  const selection = DisplayManager.selectPresenterAndAudienceDisplays(displays, primaryDisplay, isSwapped);
+  const { presenterDisplay, hasSecondary } = selection;
 
   // Open Presenter View on presenterDisplay
   presenterWindow = new BrowserWindow({
-    x: presenterDisplay.bounds.x + (secondaryDisplay ? 40 : 30),
-    y: presenterDisplay.bounds.y + (secondaryDisplay ? 40 : 30),
-    width: Math.min(1150, presenterDisplay.bounds.width - (secondaryDisplay ? 80 : 60)),
-    height: Math.min(780, presenterDisplay.bounds.height - (secondaryDisplay ? 80 : 60)),
+    x: presenterDisplay.bounds.x + (hasSecondary ? 40 : 30),
+    y: presenterDisplay.bounds.y + (hasSecondary ? 40 : 30),
+    width: Math.min(1150, presenterDisplay.bounds.width - (hasSecondary ? 80 : 60)),
+    height: Math.min(780, presenterDisplay.bounds.height - (hasSecondary ? 80 : 60)),
     minWidth: 700,
     minHeight: 500,
     title: 'NeoPowerPoint — Presenter View',
@@ -380,6 +369,22 @@ async function openPresenterWindow(): Promise<boolean> {
       webSecurity: false,
     }
   });
+
+  // Arrange audience window (fullscreen on external projector/monitor) and presenter window (on Mac)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    displayManager.arrangeWindows(mainWindow, presenterWindow);
+  }
+
+  // Re-arrange automatically if macOS/OS finishes extending the projector display asynchronously
+  const onDisplayChanged = () => {
+    if (mainWindow && !mainWindow.isDestroyed() && presenterWindow && !presenterWindow.isDestroyed()) {
+      logger.info('MainProcess', 'Display configuration changed during presentation; re-arranging windows');
+      displayManager.arrangeWindows(mainWindow, presenterWindow);
+    }
+  };
+  screen.on('display-added', onDisplayChanged);
+  screen.on('display-removed', onDisplayChanged);
+  screen.on('display-metrics-changed', onDisplayChanged);
 
   presenterWindow.webContents.on('console-message', (_event, level, message) => {
     const levelMap: Record<number, 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'> = {
@@ -452,6 +457,9 @@ async function openPresenterWindow(): Promise<boolean> {
   });
 
   presenterWindow.on('closed', async () => {
+    screen.removeListener('display-added', onDisplayChanged);
+    screen.removeListener('display-removed', onDisplayChanged);
+    screen.removeListener('display-metrics-changed', onDisplayChanged);
     presenterWindow = null;
     updateCaptureStreamingState();
     if (mainWindow && !mainWindow.isDestroyed()) {

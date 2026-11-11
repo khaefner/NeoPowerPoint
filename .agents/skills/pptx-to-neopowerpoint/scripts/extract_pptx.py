@@ -24,6 +24,7 @@ import colorsys
 import json
 import os
 import posixpath
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +41,88 @@ NS = {
 }
 EMU_PER_PT = 12700
 DEFAULT_CLRMAP = {'bg1': 'lt1', 'tx1': 'dk1', 'bg2': 'lt2', 'tx2': 'dk2'}
+
+# ---------------------------------------------------------------------------
+# Symbol / dingbat decoders
+# ---------------------------------------------------------------------------
+# PowerPoint decks routinely use Symbol, Wingdings and ZapfDingbats for glyphs
+# (bullets, arrows, checkmarks). Those fonts map ASCII/CP1252 bytes to symbols via
+# a legacy encoding; without translation browsers render tofu or wrong Latin chars.
+
+SYMBOL_MAP = {
+    0x22: '∀', 0x24: '∃', 0x27: '∋', 0x2A: '∗', 0x2D: '−', 0x40: '≅',
+    0x41: 'Α', 0x42: 'Β', 0x43: 'Χ', 0x44: 'Δ', 0x45: 'Ε', 0x46: 'Φ',
+    0x47: 'Γ', 0x48: 'Η', 0x49: 'Ι', 0x4A: 'ϑ', 0x4B: 'Κ', 0x4C: 'Λ',
+    0x4D: 'Μ', 0x4E: 'Ν', 0x4F: 'Ο', 0x50: 'Π', 0x51: 'Θ', 0x52: 'Ρ',
+    0x53: 'Σ', 0x54: 'Τ', 0x55: 'Υ', 0x56: 'ς', 0x57: 'Ω', 0x58: 'Ξ',
+    0x59: 'Ψ', 0x5A: 'Ζ', 0x5C: '∴', 0x5E: '⊥', 0x60: '‾',
+    0x61: 'α', 0x62: 'β', 0x63: 'χ', 0x64: 'δ', 0x65: 'ε', 0x66: 'φ',
+    0x67: 'γ', 0x68: 'η', 0x69: 'ι', 0x6A: 'ϕ', 0x6B: 'κ', 0x6C: 'λ',
+    0x6D: 'μ', 0x6E: 'ν', 0x6F: 'ο', 0x70: 'π', 0x71: 'θ', 0x72: 'ρ',
+    0x73: 'σ', 0x74: 'τ', 0x75: 'υ', 0x76: 'ϖ', 0x77: 'ω', 0x78: 'ξ',
+    0x79: 'ψ', 0x7A: 'ζ', 0x7E: '∼',
+    0xA1: 'ϒ', 0xA2: '′', 0xA3: '≤', 0xA4: '⁄', 0xA5: '∞', 0xA6: 'ƒ',
+    0xA7: '♣', 0xA8: '♦', 0xA9: '♥', 0xAA: '♠', 0xAB: '↔', 0xAC: '←',
+    0xAD: '↑', 0xAE: '→', 0xAF: '↓', 0xB0: '°', 0xB1: '±', 0xB2: '″',
+    0xB3: '≥', 0xB4: '×', 0xB5: '∝', 0xB6: '∂', 0xB7: '•', 0xB8: '÷',
+    0xB9: '≠', 0xBA: '≡', 0xBB: '≈', 0xBC: '…', 0xBE: '⎯', 0xBF: '↵',
+    0xC0: 'ℵ', 0xC1: 'ℑ', 0xC2: 'ℜ', 0xC3: '℘', 0xC4: '⊗', 0xC5: '⊕',
+    0xC6: '∅', 0xC7: '∩', 0xC8: '∪', 0xC9: '⊃', 0xCA: '⊇', 0xCB: '⊄',
+    0xCC: '⊂', 0xCD: '⊆', 0xCE: '∈', 0xCF: '∉', 0xD0: '∠', 0xD1: '∇',
+    0xD5: '∏', 0xD6: '√', 0xD7: '⋅', 0xD8: '¬', 0xD9: '∧', 0xDA: '∨',
+    0xDB: '⇔', 0xDC: '⇐', 0xDD: '⇑', 0xDE: '⇒', 0xDF: '⇓', 0xE0: '◊',
+    0xE1: '〈', 0xE5: '∑',
+}
+
+# Wingdings is used mostly for bullets/arrows/checks. Codes below are the common
+# glyphs PowerPoint emits (raw byte values before the 0xF000 PUA offset).
+WINGDINGS_MAP = {
+    0x20: ' ', 0x21: '✏', 0x6C: '●', 0x6D: '❍', 0x6E: '■', 0x6F: '❑',
+    0x70: '❒', 0x71: '❑', 0x72: '❒', 0x73: '●', 0x74: '◗', 0x75: '⬩',
+    0x76: '❖', 0x77: '◆', 0x78: '❖', 0x79: '✦', 0x7A: '✧', 0x7B: '★',
+    0x7C: '✶', 0x7D: '✴', 0x7E: '✵',
+    0xA1: '○', 0xA2: '◇', 0xA3: '□', 0xA4: '☺', 0xA5: '☻', 0xA6: '☼',
+    0xA7: '▪', 0xA8: '▫', 0xA9: '✦', 0xAA: '★', 0xAB: '✶', 0xAC: '✳',
+    0xAD: '✹', 0xAE: '✺', 0xAF: '✸', 0xB0: '✷', 0xB1: '✱', 0xB2: '✦',
+    0xB3: '➔', 0xB4: '➘', 0xB5: '➙', 0xB6: '➚', 0xB7: '➛', 0xB8: '➜',
+    0xB9: '➝', 0xBA: '➞', 0xBB: '➟', 0xBC: '➠', 0xBD: '➡', 0xBE: '➢',
+    0xBF: '➣', 0xC0: '➤', 0xC1: '➥', 0xC2: '➦', 0xC3: '➧', 0xC4: '➨',
+    0xC5: '➩', 0xC6: '➪', 0xC7: '➫', 0xC8: '➬', 0xC9: '➭', 0xCA: '➮',
+    0xCB: '➯', 0xCC: '➱', 0xCD: '➲', 0xCE: '➳', 0xCF: '➴', 0xD0: '➵',
+    0xD1: '➶', 0xD2: '➷', 0xD3: '➸', 0xD4: '➹', 0xD5: '➺', 0xD6: '➻',
+    0xD7: '➼', 0xD8: '➢', 0xD9: '➽', 0xDA: '➾', 0xDB: '⬅', 0xDC: '➔',
+    0xDD: '⬆', 0xDE: '⬇', 0xDF: '➡', 0xE0: '→', 0xE1: '⇒', 0xE2: '⇨',
+    0xE3: '⇧', 0xE4: '⇩', 0xE5: '⇦', 0xE6: '⇗', 0xE7: '⇘', 0xE8: '➔',
+    0xFC: '✓', 0xFD: '🗹', 0xFE: '☒', 0xFF: '☐',
+}
+
+DINGBATS_ASCII = (
+    '✁✂✃✄☎✆✇✈✉☛☞✌✍✎✏✐✑✒✓✔✕✖✗✘✙✚✛✜✝✞✟'
+    '✠✡✢✣✤✥✦✧★✩✪✫✬✭✮✯✰✱✲✳✴✵✶✷✸✹✺✻✼✽✾✿'
+)
+
+
+def translate_symbol(text, font):
+    """Translate Symbol/Wingdings/ZapfDingbats encoded text to Unicode."""
+    if not text or not font:
+        return text
+    f = font.lower()
+    if 'wingdings' in f or 'webdings' in f:
+        table = WINGDINGS_MAP
+    elif 'symbol' in f:
+        table = SYMBOL_MAP
+    elif 'zapfdingbats' in f or 'dingbat' in f:
+        table = {0x20 + i: ch for i, ch in enumerate(DINGBATS_ASCII)}
+    else:
+        return text
+    out = []
+    for ch in text:
+        code = ord(ch)
+        # Symbol fonts are often stored in the Unicode Private Use Area (F020-F0FF).
+        if 0xF020 <= code <= 0xF0FF:
+            code -= 0xF000
+        out.append(table.get(code, ch))
+    return ''.join(out)
 
 
 def q(prefix, tag):
@@ -135,6 +218,8 @@ class Ctx:
         self.clrmap = dict(DEFAULT_CLRMAP)
         self.media = {}  # zip path -> output filename
         self.master_root = None
+        self.theme_ln_styles = []
+        self.default_text_style = pres.find('p:defaultTextStyle', NS)
 
     def px(self, emu):
         return round(int(emu) * self.scale, 2)
@@ -261,13 +346,50 @@ class Ctx:
             return None
         d = ln.find('a:prstDash', NS)
         ret = {'color': col, 'width_px': self.px(int(ln.get('w', '12700'))), 'dash': d.get('val') if d is not None else 'solid'}
-        head = ln.find('a:headEnd', NS)
-        tail = ln.find('a:tailEnd', NS)
-        if head is not None and head.get('type') and head.get('type') != 'none':
-            ret['head'] = head.get('type')
-        if tail is not None and tail.get('type') and tail.get('type') != 'none':
-            ret['tail'] = tail.get('type')
+        for tag, key in (('headEnd', 'head'), ('tailEnd', 'tail')):
+            e = ln.find('a:' + tag, NS)
+            if e is not None and e.get('type') and e.get('type') != 'none':
+                ret[key] = {'type': e.get('type'),
+                            'w': e.get('w', 'med'),
+                            'len': e.get('len', 'med')}
         return ret
+
+    def style_line_of(self, style):
+        """Resolve p:style/a:lnRef (idx>0) against the theme line style list."""
+        if style is None:
+            return None
+        ref = style.find('a:lnRef', NS)
+        if ref is None:
+            return None
+        try:
+            idx = int(ref.get('idx', '0'))
+        except ValueError:
+            idx = 0
+        if idx <= 0:
+            return None
+        col = self.color_of(ref)
+        if not col:
+            return None
+        width_px = 1.0
+        if 0 < idx <= len(self.theme_ln_styles):
+            width_px = self.theme_ln_styles[idx - 1]
+        return {'color': col, 'width_px': max(1.0, width_px), 'dash': 'solid'}
+
+    def style_fill_of(self, style):
+        """Resolve p:style/a:fillRef (idx>0) to a solid fill."""
+        if style is None:
+            return None
+        ref = style.find('a:fillRef', NS)
+        if ref is None:
+            return None
+        try:
+            idx = int(ref.get('idx', '0'))
+        except ValueError:
+            idx = 0
+        if idx <= 0:
+            return None
+        col = self.color_of(ref)
+        return {'type': 'solid', 'color': col} if col else None
 
 
 # ---------------------------------------------------------------- text ----
@@ -300,6 +422,30 @@ def rpr_props(ctx, el):
     return o
 
 
+# Common PPT / Wingdings bullet symbol translation to standard Unicode
+WINGDINGS_BULLET_MAP = {
+    0x20: ' ',
+    0x71: '❑',  # 113 square shadow
+    0x72: '❒',  # 114
+    0x75: '⬩',  # 117 small diamond
+    0x76: '❖',  # 118 black florette / diamond
+    0x77: '◆',  # 119 black diamond
+    0x78: '✦',  # 120 star
+    0xa7: '▪',  # 167 square bullet (PowerPoint default square bullet!)
+    0xa8: '▫',  # 168 hollow square bullet
+    0xa9: '✦',  # 169
+    0xaa: '★',  # 170
+    0xab: '✶',  # 171
+    0xb2: '✦',  # 178
+    0xd8: '➢',  # 216 3D arrow
+    0xdc: '➔',  # 220 arrow
+    0xe0: '→',  # 224 arrow
+    0xfc: '✓',  # 252 checkmark
+    0xfd: '🗹',  # 253 ballot check
+    0xfe: '☒',  # 254 ballot x
+}
+
+
 def ppr_props(ctx, el, rels=None):
     if el is None:
         return {}
@@ -316,16 +462,53 @@ def ppr_props(ctx, el, rels=None):
             o[key] = {'percent': int(pct.get('val')) / 1000}
         elif pts is not None:
             o[key] = {'px': round(int(pts.get('val')) / 100 * EMU_PER_PT * ctx.scale, 2)}
+    # Inherit buFont / buChar / buSz independently: the font is frequently set on
+    # the master while the character is set on the slide (and vice versa).
     if el.find('a:buNone', NS) is not None:
         o['bullet'] = None
-    elif el.find('a:buChar', NS) is not None:
-        o['bullet'] = el.find('a:buChar', NS).get('char')
-    elif el.find('a:buAutoNum', NS) is not None:
-        o['bullet'] = 'auto:' + el.find('a:buAutoNum', NS).get('type', 'arabicPeriod')
+        o['bu_none'] = True
+    else:
+        bc_el = el.find('a:buChar', NS)
+        if bc_el is not None:
+            o['bu_char'] = bc_el.get('char', '')
+        elif el.find('a:buAutoNum', NS) is not None:
+            o['bullet'] = 'auto:' + el.find('a:buAutoNum', NS).get('type', 'arabicPeriod')
+            o['bu_auto'] = True
+    bf_el = el.find('a:buFont', NS)
+    if bf_el is not None and bf_el.get('typeface'):
+        o['bu_font'] = bf_el.get('typeface')
+    if el.find('a:buSzPct', NS) is not None:
+        o['bu_sz_pct'] = int(el.find('a:buSzPct', NS).get('val')) / 1000
+    if el.find('a:buSzPts', NS) is not None:
+        o['bu_sz_px'] = round(int(el.find('a:buSzPts', NS).get('val')) / 100 * EMU_PER_PT * ctx.scale, 2)
     bc = ctx.color_of(el.find('a:buClr', NS))
     if bc:
         o['bullet_color'] = bc
+    tlst = el.find('a:tabLst', NS)
+    if tlst is not None:
+        o['tab_stops'] = [ctx.px(t.get('pos')) for t in tlst.findall('a:tab', NS) if t.get('pos')]
     return o
+
+
+def merge_ppr(dst, props):
+    """Merge paragraph props, honouring `<a:buNone/>` as an explicit override.
+
+    ``buChar``/``buFont`` are frequently defined on the master while the layout
+    or slide suppresses the bullet with ``buNone``.  ``dict.update`` alone would
+    keep the inherited character, so clear the bullet keys when buNone wins.
+    """
+    if props.get('bu_none'):
+        for k in ('bu_char', 'bu_font', 'bu_sz_pct', 'bu_sz_px', 'bullet', 'bullet_color', 'bu_auto'):
+            dst.pop(k, None)
+    elif props.get('bu_auto'):
+        # <a:buAutoNum> overrides any bullet character inherited from master/layout.
+        for k in ('bu_char', 'bu_font', 'bu_none'):
+            dst.pop(k, None)
+    elif 'bu_char' in props or props.get('bullet'):
+        # A concrete bullet on a higher-priority source overrides an inherited buNone.
+        dst.pop('bu_none', None)
+    dst.update(props)
+    return dst
 
 
 def lvl_style(ctx, sources, lvl):
@@ -337,12 +520,12 @@ def lvl_style(ctx, sources, lvl):
         el = src.find('a:lvl%dpPr' % (lvl + 1), NS)
         if el is None:
             continue
-        ppr.update(ppr_props(ctx, el))
+        merge_ppr(ppr, ppr_props(ctx, el))
         rpr.update(rpr_props(ctx, el.find('a:defRPr', NS)))
     return ppr, rpr
 
 
-def parse_text(ctx, txbody, sources, rels):
+def parse_text(ctx, txbody, sources, rels, chain=None):
     if txbody is None:
         return None
     paras = []
@@ -350,7 +533,16 @@ def parse_text(ctx, txbody, sources, rels):
         pel = p.find('a:pPr', NS)
         lvl = int(pel.get('lvl', '0')) if pel is not None else 0
         ppr, base_rpr = lvl_style(ctx, sources, lvl)
-        ppr.update(ppr_props(ctx, pel))
+        merge_ppr(ppr, ppr_props(ctx, pel))
+        # buFont and buChar can be inherited from different levels, so translate
+        # only after the complete inheritance chain has been merged. A buNone on
+        # any higher-priority source must suppress an inherited buChar.
+        if 'bu_char' in ppr and not ppr.get('bu_none') and not ppr.get('bu_auto'):
+            bullet_font = ppr.get('bu_font', '')
+            ch = ppr['bu_char']
+            if not bullet_font and ch == '§':
+                bullet_font = 'Wingdings'  # legacy raw CP1252 square bullet
+            ppr['bullet'] = translate_symbol(ch, bullet_font)
         runs = []
         for ch in p:
             n = local(ch)
@@ -358,7 +550,16 @@ def parse_text(ctx, txbody, sources, rels):
                 t = ch.find('a:t', NS)
                 rpr = dict(base_rpr)
                 rpr.update(rpr_props(ctx, ch.find('a:rPr', NS)))
-                run = {'text': t.text if t is not None and t.text else ''}
+                sym = ch.find('a:sym', NS)
+                if sym is not None:
+                    text = sym.get('char', '')
+                    if sym.get('typeface'):
+                        rpr['font'] = ctx.fonts.get(sym.get('typeface'), sym.get('typeface'))
+                else:
+                    text = t.text if t is not None and t.text else ''
+                if text and rpr.get('font'):
+                    text = translate_symbol(text, rpr['font'])
+                run = {'text': text}
                 run.update(rpr)
                 if 'size_pt' in run:
                     run['size_px'] = round(run['size_pt'] * EMU_PER_PT * ctx.scale, 1)
@@ -370,6 +571,10 @@ def parse_text(ctx, txbody, sources, rels):
                 runs.append(run)
             elif n == 'br':
                 runs.append({'text': '\n'})
+            elif n == 'tab':
+                run = {'text': '\t', 'tab': True}
+                run.update(base_rpr)
+                runs.append(run)
         if not runs:
             end = p.find('a:endParaRPr', NS)
             rpr = dict(base_rpr)
@@ -381,10 +586,19 @@ def parse_text(ctx, txbody, sources, rels):
         para = {'level': lvl, 'runs': runs}
         para.update(ppr)
         paras.append(para)
-    body = txbody.find('a:bodyPr', NS)
+    # ---- bodyPr: merge master -> layout -> shape, then apply OOXML defaults ----
     info = {}
-    if body is not None:
-        for k in ('anchor', 'wrap', 'vert'):
+    body_prs = []
+    for anc in (chain or []):
+        if anc is not None:
+            bp = anc.find('p:txBody/a:bodyPr', NS)
+            if bp is not None:
+                body_prs.append(bp)
+    own_body = txbody.find('a:bodyPr', NS)
+    if own_body is not None:
+        body_prs.append(own_body)
+    for body in body_prs:
+        for k in ('anchor', 'anchorCtr', 'wrap', 'vert'):
             if body.get(k):
                 info[k] = body.get(k)
         for k, key in (('lIns', 'pad_left'), ('tIns', 'pad_top'), ('rIns', 'pad_right'), ('bIns', 'pad_bottom')):
@@ -392,9 +606,19 @@ def parse_text(ctx, txbody, sources, rels):
                 info[key] = ctx.px(body.get(k))
         na = body.find('a:normAutofit', NS)
         if na is not None:
-            info['autofit'] = {'font_scale_pct': int(na.get('fontScale', '100000')) / 1000}
+            fit = {'ln_spc_reduction_pct': int(na.get('lnSpcReduction', '0')) / 1000}
+            # Only trust a stored fontScale: when it is absent PowerPoint has not
+            # (yet) fitted the text, so the renderer must recompute it at runtime.
+            if na.get('fontScale') is not None:
+                fit['font_scale_pct'] = int(na.get('fontScale')) / 1000
+            info['autofit'] = fit
         elif body.find('a:spAutoFit', NS) is not None:
             info['autofit'] = 'shape'
+    # OOXML defaults: lIns=rIns=91440 EMU (0.1in), tIns=bIns=45720 EMU (0.05in)
+    info.setdefault('pad_left', ctx.px(91440))
+    info.setdefault('pad_right', ctx.px(91440))
+    info.setdefault('pad_top', ctx.px(45720))
+    info.setdefault('pad_bottom', ctx.px(45720))
     return {'paragraphs': paras, 'body': info}
 
 
@@ -443,6 +667,134 @@ def get_xfrm(sp):
     return None
 
 
+def cust_geom_path(p_elem, default_w, default_h):
+    """Convert an OOXML a:path into an SVG path string (including arcTo)."""
+    path_w = float(p_elem.get('w') or default_w or 0)
+    path_h = float(p_elem.get('h') or default_h or 0)
+    d_cmds = []
+    cur = [0.0, 0.0]
+    for child in p_elem:
+        ctag = local(child)
+        if ctag == 'moveTo':
+            pt = child.find('a:pt', NS)
+            if pt is not None:
+                cur = [float(pt.get('x', '0')), float(pt.get('y', '0'))]
+                d_cmds.append('M %g %g' % (cur[0], cur[1]))
+        elif ctag == 'lnTo':
+            pt = child.find('a:pt', NS)
+            if pt is not None:
+                cur = [float(pt.get('x', '0')), float(pt.get('y', '0'))]
+                d_cmds.append('L %g %g' % (cur[0], cur[1]))
+        elif ctag == 'cubicBezTo':
+            pts = child.findall('a:pt', NS)
+            if len(pts) == 3:
+                d_cmds.append('C %g %g, %g %g, %g %g' % tuple(
+                    float(pts[i].get(k, '0')) for i in range(3) for k in ('x', 'y')))
+                cur = [float(pts[2].get('x', '0')), float(pts[2].get('y', '0'))]
+        elif ctag == 'quadBezTo':
+            pts = child.findall('a:pt', NS)
+            if len(pts) == 2:
+                d_cmds.append('Q %g %g, %g %g' % tuple(
+                    float(pts[i].get(k, '0')) for i in range(2) for k in ('x', 'y')))
+                cur = [float(pts[1].get('x', '0')), float(pts[1].get('y', '0'))]
+        elif ctag == 'arcTo':
+            wr = float(child.get('wR', '0'))
+            hr = float(child.get('hR', '0'))
+            st = float(child.get('stAng', '0')) / 60000.0
+            sw = float(child.get('swAng', '0')) / 60000.0
+            if wr and hr:
+                import math
+                st_r, sw_r = math.radians(st), math.radians(sw)
+                cx = cur[0] - wr * math.cos(st_r)
+                cy = cur[1] - hr * math.sin(st_r)
+                ex = cx + wr * math.cos(st_r + sw_r)
+                ey = cy + hr * math.sin(st_r + sw_r)
+                large = 1 if abs(sw) > 180 else 0
+                sweep = 1 if sw > 0 else 0
+                d_cmds.append('A %g %g 0 %d %d %g %g' % (wr, hr, large, sweep, ex, ey))
+                cur = [ex, ey]
+        elif ctag == 'close':
+            d_cmds.append('Z')
+    out = {'w': path_w, 'h': path_h, 'd': ' '.join(d_cmds)}
+    if p_elem.get('fill'):
+        out['fill'] = p_elem.get('fill')
+    if p_elem.get('stroke') is not None:
+        out['stroke'] = p_elem.get('stroke') != '0'
+    return out
+
+
+def parse_geometry(ctx, sppr, raw_w, raw_h):
+    """Extract prstGeom / avLst / custGeom for shapes AND connectors."""
+    out = {}
+    if sppr is None:
+        return out
+    geom = sppr.find('a:prstGeom', NS)
+    cust = sppr.find('a:custGeom', NS)
+    if geom is not None:
+        out['geometry'] = geom.get('prst') or 'rect'
+        adj = {}
+        for g in geom.findall('a:avLst/a:gd', NS):
+            fmla = g.get('fmla', '')
+            m = re.search(r'-?\d+(?:\.\d+)?', fmla)
+            if m:
+                adj[g.get('name')] = float(m.group(0))
+        if adj:
+            out['geometry_adjust'] = adj
+    elif cust is not None:
+        out['geometry'] = 'custom'
+        paths = [cust_geom_path(p, raw_w, raw_h)
+                 for p in cust.findall('a:pathLst/a:path', NS)]
+        paths = [p for p in paths if p['d']]
+        if paths:
+            out['paths'] = paths
+    else:
+        out['geometry'] = 'rect'
+    return out
+
+
+def apply_group_transform(tf, x, y, w, h, own_rot=0.0, own_fh=False, own_fv=False):
+    """Map an EMU box through enclosing group transforms (innermost to outermost).
+
+    tf is a sequence of group frames:
+      (off_x, off_y, ext_cx, ext_cy, chOff_x, chOff_y, chExt_cx, chExt_cy, rot, flipH, flipV)
+    """
+    xa, ya, wa, ha = float(x), float(y), float(w), float(h)
+    tot_rot = float(own_rot or 0.0)
+    tot_fh = bool(own_fh)
+    tot_fv = bool(own_fv)
+    for frame in reversed(tf or ()):
+        ox, oy, ecx, ecy, cox, coy, cecx, cecy, grot, gfh, gfv = frame
+        sx = ecx / (cecx or 1.0)
+        sy = ecy / (cecy or 1.0)
+        xa = ox + (xa - cox) * sx
+        ya = oy + (ya - coy) * sy
+        wa = wa * sx
+        ha = ha * sy
+        if gfh or gfv or grot:
+            cx = ox + ecx / 2.0
+            cy = oy + ecy / 2.0
+            if gfh:
+                xa = 2.0 * cx - (xa + wa)
+                tot_fh = not tot_fh
+                if tot_rot:
+                    tot_rot = -tot_rot
+            if gfv:
+                ya = 2.0 * cy - (ya + ha)
+                tot_fv = not tot_fv
+                if tot_rot:
+                    tot_rot = -tot_rot
+            if grot:
+                import math
+                a = math.radians(grot)
+                scx, scy = xa + wa / 2.0, ya + ha / 2.0
+                dx, dy = scx - cx, scy - cy
+                scx = cx + dx * math.cos(a) - dy * math.sin(a)
+                scy = cy + dx * math.sin(a) + dy * math.cos(a)
+                xa, ya = scx - wa / 2.0, scy - ha / 2.0
+                tot_rot += grot
+    return xa, ya, wa, ha, tot_rot, tot_fh, tot_fv
+
+
 def apply_group(tf, x, y, w, h):
     gx, gy, sx, sy = tf
     return gx + (x) * sx, gy + (y) * sy, w * sx, h * sy
@@ -468,79 +820,54 @@ def parse_shape(ctx, sp, rels, chain, tf, source, master_txstyles):
             if anc is not None and get_xfrm(anc) is not None:
                 xf = get_xfrm(anc)
                 break
+    raw_w = raw_h = 0
     if xf is not None and xf.find('a:off', NS) is not None:
         off, ext = xf.find('a:off', NS), xf.find('a:ext', NS)
         x, y, w, h = int(off.get('x')), int(off.get('y')), int(ext.get('cx')), int(ext.get('cy'))
-        gx, gy, sx, sy = tf
-        out['x'], out['y'] = ctx.px(gx + x * sx), ctx.px(gy + y * sy)
-        out['w'], out['h'] = ctx.px(w * sx), ctx.px(h * sy)
-        if xf.get('rot'):
-            out['rotation_deg'] = int(xf.get('rot')) / 60000
-        if xf.get('flipH') == '1':
+        raw_w, raw_h = w, h
+        own_rot = int(xf.get('rot', '0')) / 60000.0
+        own_fh = xf.get('flipH') == '1'
+        own_fv = xf.get('flipV') == '1'
+        x, y, w, h, tot_rot, tot_fh, tot_fv = apply_group_transform(
+            tf, x, y, w, h, own_rot, own_fh, own_fv)
+        out['x'], out['y'] = ctx.px(x), ctx.px(y)
+        out['w'], out['h'] = ctx.px(w), ctx.px(h)
+        if tot_rot:
+            out['rotation_deg'] = tot_rot
+        if tot_fh:
             out['flipH'] = True
-        if xf.get('flipV') == '1':
+        if tot_fv:
             out['flipV'] = True
 
     sppr = sp.find('p:spPr', NS)
+    style_el = sp.find('p:style', NS)
+    fill = ctx.fill_of(sppr, rels) if sppr is not None else None
+    if fill is None and chain:
+        for anc in reversed(chain):
+            if anc is not None:
+                fill = ctx.fill_of(anc.find('p:spPr', NS), rels)
+                if fill:
+                    break
+    if fill is None:
+        fill = ctx.style_fill_of(style_el)
+    if fill:
+        out['fill'] = fill
+    ln = ctx.line_of(sppr) if sppr is not None else None
+    # A shape with an explicit <a:ln><a:noFill/> must stay borderless; only a
+    # completely absent <a:ln> may inherit p:style/a:lnRef.
+    if ln is None and (sppr is None or sppr.find('a:ln', NS) is None):
+        ln = ctx.style_line_of(style_el)
+    if ln:
+        out['line'] = ln
+
     if kind == 'sp':
-        geom = sppr.find('a:prstGeom', NS) if sppr is not None else None
-        cust = sppr.find('a:custGeom', NS) if sppr is not None else None
-        out['geometry'] = geom.get('prst') if geom is not None else ('custom' if cust is not None else 'rect')
-        if geom is not None:
-            adj = {g.get('name'): g.get('fmla') for g in geom.findall('a:avLst/a:gd', NS)}
-            if adj:
-                out['geometry_adjust'] = adj
-        if cust is not None:
-            paths = []
-            for p_elem in cust.findall('a:pathLst/a:path', NS):
-                path_w = float(p_elem.get('w', '0'))
-                path_h = float(p_elem.get('h', '0'))
-                d_cmds = []
-                for child in p_elem:
-                    ctag = local(child)
-                    if ctag == 'moveTo':
-                        pt = child.find('a:pt', NS)
-                        if pt is not None:
-                            d_cmds.append(f"M {pt.get('x', '0')} {pt.get('y', '0')}")
-                    elif ctag == 'lnTo':
-                        pt = child.find('a:pt', NS)
-                        if pt is not None:
-                            d_cmds.append(f"L {pt.get('x', '0')} {pt.get('y', '0')}")
-                    elif ctag == 'cubicBezTo':
-                        pts = child.findall('a:pt', NS)
-                        if len(pts) == 3:
-                            d_cmds.append(f"C {pts[0].get('x', '0')} {pts[0].get('y', '0')}, {pts[1].get('x', '0')} {pts[1].get('y', '0')}, {pts[2].get('x', '0')} {pts[2].get('y', '0')}")
-                    elif ctag == 'quadBezTo':
-                        pts = child.findall('a:pt', NS)
-                        if len(pts) == 2:
-                            d_cmds.append(f"Q {pts[0].get('x', '0')} {pts[0].get('y', '0')}, {pts[1].get('x', '0')} {pts[1].get('y', '0')}")
-                    elif ctag == 'close':
-                        d_cmds.append("Z")
-                if d_cmds:
-                    paths.append({'w': path_w, 'h': path_h, 'd': ' '.join(d_cmds)})
-            if paths:
-                out['paths'] = paths
-        fill = ctx.fill_of(sppr, rels)
-        if fill is None and chain:
-            for anc in reversed(chain):
-                if anc is not None:
-                    fill = ctx.fill_of(anc.find('p:spPr', NS), rels)
-                    if fill:
-                        break
-        if fill:
-            out['fill'] = fill
-        ln = ctx.line_of(sppr)
-        if ln:
-            out['line'] = ln
-        st = sp.find('p:style', NS)
-        if st is not None and fill is None:
-            fr = st.find('a:fillRef', NS)
-            if fr is not None and fr.get('idx') not in (None, '0'):
-                out['fill_from_style'] = ctx.color_of(fr)
+        out.update(parse_geometry(ctx, sppr, raw_w, raw_h))
         if sppr is not None and sppr.find('a:effectLst/a:outerShdw', NS) is not None:
             out['shadow'] = True
         # text
         srcs = []
+        if ctx.default_text_style is not None:
+            srcs.append(ctx.default_text_style)
         if ph and norm_ph(ph['type']) == 'title':
             srcs.append(master_txstyles.get('titleStyle'))
         elif ph and ph['type'] in ('dt', 'ftr', 'sldNum'):
@@ -553,15 +880,24 @@ def parse_shape(ctx, sp, rels, chain, tf, source, master_txstyles):
             if anc is not None:
                 srcs.append(anc.find('p:txBody/a:lstStyle', NS))
         srcs.append(sp.find('p:txBody/a:lstStyle', NS))
-        text = parse_text(ctx, sp.find('p:txBody', NS), srcs, rels)
+        text = parse_text(ctx, sp.find('p:txBody', NS), srcs, rels, chain)
         if text and any(not p.get('empty') for p in text['paragraphs']):
             out['text'] = text
-        elif text and (fill or ln) is None and not ph:
+        elif text and out.get('fill') is None and out.get('line') is None and not ph:
             return None
         elif text:
             out['text'] = text  # keep empty paragraphs' styling for filled shapes
-        if not ph and 'text' not in out and not out.get('fill') and not out.get('line') and not out.get('fill_from_style'):
-            return None
+        # p:style/a:fontRef supplies the default run colour / typeface
+        if text:
+            fr = style_el.find('a:fontRef', NS) if style_el is not None else None
+            if fr is not None:
+                fcol = ctx.color_of(fr)
+                for para in text['paragraphs']:
+                    for run in para.get('runs', []):
+                        if fcol and 'color' not in run:
+                            run['color'] = fcol
+            if not ph and 'text' not in out and not out.get('fill') and not out.get('line'):
+                return None
     elif kind == 'pic':
         bf = sp.find('p:blipFill', NS)
         img = ctx.blip_target(bf, rels) if bf is not None else None
@@ -574,9 +910,6 @@ def parse_shape(ctx, sp, rels, chain, tf, source, master_txstyles):
         geom = sppr.find('a:prstGeom', NS) if sppr is not None else None
         if geom is not None and geom.get('prst') != 'rect':
             out['geometry'] = geom.get('prst')
-        ln = ctx.line_of(sppr)
-        if ln:
-            out['line'] = ln
     elif kind == 'graphicFrame':
         gd = sp.find('a:graphic/a:graphicData', NS)
         uri = gd.get('uri', '') if gd is not None else ''
@@ -590,10 +923,9 @@ def parse_shape(ctx, sp, rels, chain, tf, source, master_txstyles):
             out['unsupported'] = uri.split('/')[-1] or 'graphicFrame'  # e.g. SmartArt: use reference PNG
     elif kind == 'cxnSp':
         out['kind'] = 'line'
-        ln = ctx.line_of(sppr)
-        if not ln:
+        out.update(parse_geometry(ctx, sppr, raw_w, raw_h))
+        if not out.get('line'):
             return None
-        out['line'] = ln
     return out
 
 
@@ -676,15 +1008,63 @@ def walk_tree(ctx, tree, rels, layout_root, master_root, tf, source, master_txst
             if xf is not None and xf.find('a:chExt', NS) is not None:
                 off, ext = xf.find('a:off', NS), xf.find('a:ext', NS)
                 choff, chext = xf.find('a:chOff', NS), xf.find('a:chExt', NS)
-                cw, ch = int(chext.get('cx')) or 1, int(chext.get('cy')) or 1
-                sx, sy = int(ext.get('cx')) / cw, int(ext.get('cy')) / ch
-                gx = tf[0] + (int(off.get('x')) - int(choff.get('x')) * sx) * tf[2]
-                gy = tf[1] + (int(off.get('y')) - int(choff.get('y')) * sy) * tf[3]
-                ntf = (gx, gy, sx * tf[2], sy * tf[3])
+                rot = int(xf.get('rot', '0')) / 60000.0
+                fh = xf.get('flipH') == '1'
+                fv = xf.get('flipV') == '1'
+                frame = (
+                    int(off.get('x')), int(off.get('y')),
+                    int(ext.get('cx')), int(ext.get('cy')),
+                    int(choff.get('x')), int(choff.get('y')),
+                    int(chext.get('cx')) or 1, int(chext.get('cy')) or 1,
+                    rot, fh, fv,
+                )
+                ntf = tuple(tf) + (frame,)
             walk_tree(ctx, sp, rels, layout_root, master_root, ntf, source, master_txstyles, out, new_groups)
 
 
-def parse_slide_timing(root):
+def _motion_path_to_px(path, cw, ch):
+    """Convert a normalized OOXML motion path into slide-pixel SVG path + delta."""
+    if not path:
+        return None, 0.0, 0.0
+    toks = path.replace(',', ' ').split()
+    out = []
+    pts = []
+    cmd = None
+    i = 0
+    counts = {'M': 2, 'L': 2, 'T': 2, 'C': 6, 'Q': 4, 'S': 4}
+    while i < len(toks):
+        t = toks[i]
+        if t in ('M', 'L', 'T', 'C', 'Q', 'S', 'Z', 'E'):
+            cmd = t
+            i += 1
+            if t in ('Z', 'E'):
+                out.append('Z')
+            else:
+                out.append(t)
+            continue
+        n = counts.get(cmd, 2)
+        nums = []
+        try:
+            while len(nums) < n and i < len(toks):
+                nums.append(float(toks[i]))
+                i += 1
+        except ValueError:
+            i += 1
+            continue
+        for j in range(0, len(nums) - 1, 2):
+            x, y = nums[j] * cw, nums[j + 1] * ch
+            pts.append((x, y))
+            out.append('%g %g' % (x, y))
+    d = ' '.join(out)
+    if len(pts) >= 2:
+        dx = pts[-1][0] - pts[0][0]
+        dy = pts[-1][1] - pts[0][1]
+    else:
+        dx = dy = 0.0
+    return d, dx, dy
+
+
+def parse_slide_timing(root, ctx):
     timing = root.find('p:timing', NS)
     if timing is None:
         return None
@@ -698,28 +1078,97 @@ def parse_slide_timing(root):
     if childTnLst is None:
         return None
 
-    steps = []
-    for par in childTnLst.findall('p:par', NS):
-        step_effects = []
-        for ctn in par.findall('.//p:cTn', NS):
-            pClass = ctn.attrib.get('presetClass')
-            pId = ctn.attrib.get('presetID')
-            subType = ctn.attrib.get('presetSubtype')
-            nodeType = ctn.attrib.get('nodeType', 'clickEffect')
-            dur = ctn.attrib.get('dur')
-            dur_ms = int(dur) if dur and dur.isdigit() else 400
+    # Parent map so a behaviour can inherit nodeType from an enclosing cTn.
+    parents = {}
+    for parent in timing.iter():
+        for child in parent:
+            parents[child] = parent
 
+    flat = []
+    top_pars = childTnLst.findall('p:par', NS)
+    for par_i, par in enumerate(top_pars):
+        # document order of effect containers (presetClass is set on effect cTns)
+        for ctn in par.iter(q('p', 'cTn')):
+            pClass = ctn.get('presetClass')
+            if not pClass:
+                continue
+            # nearest nodeType on the ancestor chain
+            node_type = 'clickEffect'
+            anc = ctn
+            while anc is not None:
+                nt = anc.get('nodeType')
+                if nt in ('clickEffect', 'withEffect', 'afterEffect'):
+                    node_type = nt
+                    break
+                anc = parents.get(anc)
+            dur_candidates = []
+            for d_el in [ctn] + ctn.findall('.//p:cBhvr/p:cTn', NS):
+                d_val = d_el.get('dur')
+                if d_val and str(d_val).isdigit():
+                    dur_candidates.append(int(d_val))
+            dur_ms = max(dur_candidates) if dur_candidates else 400
+            stconds = ctn.findall('p:stCondLst/p:cond', NS)
+            delay_ms = 0
+            if stconds and stconds[0].get('delay') and str(stconds[0].get('delay')).isdigit():
+                delay_ms = int(stconds[0].get('delay'))
+            pId = ctn.get('presetID')
+            subType = ctn.get('presetSubtype')
+
+            anim_motion = ctn.find('.//p:animMotion', NS)
+            set_el = ctn.find('.//p:set', NS)
             anim_eff = ctn.find('.//p:animEffect', NS)
-            effect_filter = anim_eff.attrib.get('filter') if anim_eff is not None else None
+            effect_filter = anim_eff.get('filter') if anim_eff is not None else None
 
-            for cBhvr in ctn.findall('.//p:cBhvr', NS):
+            effect_name = 'appear'
+            effect_kind = 'visibility'
+            motion = {}
+            if anim_motion is not None:
+                effect_name = 'motion'
+                effect_kind = 'path'
+                d_px, dx, dy = _motion_path_to_px(anim_motion.get('path'), ctx.canvas_w, ctx.canvas_h)
+                motion = {'motion_path': d_px, 'dx_px': round(dx, 2), 'dy_px': round(dy, 2)}
+            elif set_el is not None:
+                to_el = set_el.find('p:to', NS)
+                value = None
+                if to_el is not None:
+                    sv = to_el.find('p:strVal', NS)
+                    value = sv.get('val') if sv is not None else None
+                if value == 'hidden' or pClass == 'exit':
+                    effect_name = 'disappear'
+                else:
+                    effect_name = 'appear'
+            elif effect_filter:
+                if 'dissolve' in effect_filter or 'fade' in effect_filter:
+                    effect_name = 'fade'
+                elif 'wipe' in effect_filter:
+                    if 'left' in effect_filter: effect_name = 'wipe-left'
+                    elif 'right' in effect_filter: effect_name = 'wipe-right'
+                    elif 'up' in effect_filter: effect_name = 'wipe-up'
+                    elif 'down' in effect_filter: effect_name = 'wipe-down'
+                    else: effect_name = 'wipe-right'
+            elif pId == '9':
+                effect_name = 'fade'
+            elif pId == '22':
+                if subType == '1': effect_name = 'wipe-down'
+                elif subType == '2': effect_name = 'wipe-left'
+                elif subType == '4': effect_name = 'wipe-right'
+                elif subType == '8': effect_name = 'wipe-up'
+                else: effect_name = 'wipe-right'
+            elif pClass == 'exit':
+                effect_name = 'fade-out'
+
+            behaviours = ctn.findall('.//p:cBhvr', NS)
+            if not behaviours:
+                continue
+            seen_in_ctn = set()
+            for cBhvr in behaviours:
                 tgt = cBhvr.find('p:tgtEl', NS)
                 if tgt is None:
                     continue
                 spTgt = tgt.find('p:spTgt', NS)
                 if spTgt is None:
                     continue
-                spid = spTgt.attrib.get('spid')
+                spid = spTgt.get('spid')
                 if not spid:
                     continue
                 txEl = spTgt.find('p:txEl', NS)
@@ -727,51 +1176,71 @@ def parse_slide_timing(root):
                 if txEl is not None:
                     pRg = txEl.find('p:pRg', NS)
                     if pRg is not None:
-                        st = int(pRg.attrib.get('st', 0))
-                        end = int(pRg.attrib.get('end', st))
-                        p_range = [st, end]
+                        p_range = [int(pRg.get('st', 0)), int(pRg.get('end', pRg.get('st', 0)))]
+                ctn_target_key = (spid, tuple(p_range) if p_range else None)
+                if ctn_target_key in seen_in_ctn:
+                    continue
+                seen_in_ctn.add(ctn_target_key)
+                rec = {
+                    'spid': spid,
+                    'para_range': p_range,
+                    'type': pClass,
+                    'kind': effect_kind,
+                    'effect': effect_name,
+                    'node_type': node_type,
+                    'delay_ms': delay_ms,
+                    'dur_ms': dur_ms,
+                    'preset_id': pId,
+                }
+                rec.update(motion)
+                flat.append((ctn_target_key, rec))
 
-                effect_name = 'appear'
-                if effect_filter:
-                    if 'dissolve' in effect_filter or 'fade' in effect_filter:
-                        effect_name = 'fade'
-                    elif 'wipe' in effect_filter:
-                        if 'left' in effect_filter: effect_name = 'wipe-left'
-                        elif 'right' in effect_filter: effect_name = 'wipe-right'
-                        elif 'up' in effect_filter: effect_name = 'wipe-up'
-                        elif 'down' in effect_filter: effect_name = 'wipe-down'
-                        else: effect_name = 'wipe-right'
-                elif pId == '9':
-                    effect_name = 'fade'
-                elif pId == '22':
-                    if subType == '1': effect_name = 'wipe-down'
-                    elif subType == '2': effect_name = 'wipe-left'
-                    elif subType == '4': effect_name = 'wipe-right'
-                    elif subType == '8': effect_name = 'wipe-up'
-                    else: effect_name = 'wipe-right'
-                elif pClass == 'exit':
-                    effect_name = 'fade-out'
+    if not flat:
+        return None
 
-                existing = [e for e in step_effects if e['spid'] == spid and e['para_range'] == p_range and e['type'] == (pClass or 'entr')]
-                if not existing:
-                    step_effects.append({
-                        'spid': spid,
-                        'para_range': p_range,
-                        'type': pClass or 'entr',
-                        'effect': effect_name,
-                        'node_type': nodeType,
-                        'dur_ms': dur_ms
-                    })
-        if step_effects:
-            steps.append({
-                'step': len(steps) + 1,
-                'effects': step_effects
-            })
+    # Bucket into click steps: a clickEffect starts a new step once the current
+    # one has content; withEffect / afterEffect join the active step.
+    steps = []
+    current = None
+    for _, rec in flat:
+        if rec['node_type'] == 'clickEffect' and (current is None or current['effects']):
+            current = {'step': len(steps) + 1, 'effects': []}
+            steps.append(current)
+        if current is None:
+            current = {'step': len(steps) + 1, 'effects': []}
+            steps.append(current)
+        current['effects'].append(rec)
     if not steps:
         return None
-    return {'total_steps': len(steps), 'steps': steps}
 
+    # Compute cumulative intra-step delay_ms for chained afterEffect / withEffect actions.
+    for step_obj in steps:
+        cur_start_ms = 0
+        cur_end_ms = 0
+        for idx, eff in enumerate(step_obj['effects']):
+            own_delay = eff.get('delay_ms', 0)
+            dur = eff.get('dur_ms', 400)
+            chain_dur = 20 if (eff.get('effect') in ('appear', 'disappear') and dur <= 10) else dur
+            if idx == 0 or eff.get('node_type') == 'clickEffect':
+                cur_start_ms = own_delay
+                cur_end_ms = cur_start_ms + chain_dur
+                eff['delay_ms'] = cur_start_ms
+            elif eff.get('node_type') == 'afterEffect':
+                cur_start_ms = cur_end_ms + own_delay
+                cur_end_ms = cur_start_ms + chain_dur
+                eff['delay_ms'] = cur_start_ms
+            else:
+                eff_start = cur_start_ms + own_delay
+                cur_end_ms = max(cur_end_ms, eff_start + chain_dur)
+                eff['delay_ms'] = eff_start
 
+    # Paragraph build list (build="p") and diagram build info.
+    builds = {}
+    for b in root.findall('p:timing//p:bldLst/p:bldP', NS):
+        builds[b.get('spid')] = {'build': b.get('build', 'whole'),
+                                 'bldLvl': b.get('bldLvl'),
+                                 'uiExpand': b.get('uiExpand')}
+    return {'total_steps': len(steps), 'steps': steps, 'builds': builds}
 def background(ctx, root, rels):
     bg = root.find('p:cSld/p:bg', NS)
     if bg is None:
@@ -786,7 +1255,7 @@ def background(ctx, root, rels):
 
 
 def load_theme(pkg, theme_part):
-    colors, fonts = {}, {}
+    colors, fonts, ln_styles = {}, {}, []
     th = pkg.xml(theme_part) if theme_part else None
     if th is not None:
         for c in th.find('.//a:clrScheme', NS):
@@ -796,7 +1265,12 @@ def load_theme(pkg, theme_part):
         if fs is not None:
             fonts = {'+mj-lt': fs.find('a:majorFont/a:latin', NS).get('typeface'),
                      '+mn-lt': fs.find('a:minorFont/a:latin', NS).get('typeface')}
-    return colors, fonts
+        fmt = th.find('.//a:fmtScheme', NS)
+        if fmt is not None:
+            for ln in fmt.findall('a:lnStyleLst/a:ln', NS):
+                # theme line widths are EMU; convert via a temporary scale below
+                ln_styles.append(int(ln.get('w', '12700')))
+    return colors, fonts, ln_styles
 
 
 def main():
@@ -810,7 +1284,7 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     pkg = Pkg(args.pptx)
     ctx = Ctx(pkg, args.width, args.out)
-    full_tf = (0, 0, 1, 1)
+    full_tf = ()
 
     # A deck can contain SEVERAL slide masters, each with its own theme, colour map,
     # text styles and decor. Everything below is resolved per master.
@@ -823,22 +1297,23 @@ def main():
             root = pkg.xml(mpart)
             mrels = pkg.rels(mpart)
             theme_part = next((r['target'] for r in mrels.values() if r['type'] == 'theme'), None)
-            colors, fonts = load_theme(pkg, theme_part)
+            colors, fonts, ln_emu = load_theme(pkg, theme_part)
             clrmap = dict(DEFAULT_CLRMAP)
             cm = root.find('p:clrMap', NS)
             if cm is not None:
                 clrmap.update(dict(cm.attrib))
             tx = root.find('p:txStyles', NS)
             m = {'part': mpart, 'root': root, 'rels': mrels, 'colors': colors, 'fonts': fonts, 'clrmap': clrmap,
+                 'ln_styles': [ctx.px(w) for w in ln_emu],
                  'txstyles': {local(c): c for c in tx} if tx is not None else {}}
             masters[mpart] = m
-            ctx.theme, ctx.fonts, ctx.clrmap = colors, fonts, clrmap
+            ctx.theme, ctx.fonts, ctx.clrmap, ctx.theme_ln_styles = colors, fonts, clrmap, m['ln_styles']
             shapes = []
             walk_tree(ctx, root.find('p:cSld/p:spTree', NS), mrels, None, root, full_tf, 'master', m['txstyles'], shapes)
             # master placeholders (title, body...) are templates, not decor: drop them
             m['decor_shapes'] = [x for x in shapes if 'placeholder' not in x]
             m['background'] = background(ctx, root, mrels)
-        ctx.theme, ctx.fonts, ctx.clrmap = m['colors'], m['fonts'], m['clrmap']
+        ctx.theme, ctx.fonts, ctx.clrmap, ctx.theme_ln_styles = m['colors'], m['fonts'], m['clrmap'], m['ln_styles']
         return m
 
     layouts = {}
@@ -899,7 +1374,7 @@ def main():
             'background': own_bg,
             'effective_background': own_bg or layout['background'] or m['background'],
             'notes': notes,
-            'animations': parse_slide_timing(root),
+            'animations': parse_slide_timing(root, ctx),
             'shapes': shapes,
         })
 

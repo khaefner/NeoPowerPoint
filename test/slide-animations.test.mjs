@@ -101,6 +101,28 @@ async function runTests() {
   if (!sampleHtml.includes('NEODECK_NEXT_STEP') || !sampleHtml.includes('goToAnimStep')) {
     throw new Error(`Sample animated slide (${sampleAnimSlide.path}) missing embedded animation step controller script`);
   }
+  if (!sampleHtml.includes('data-anim-timeline')) {
+    throw new Error(`Sample animated slide (${sampleAnimSlide.path}) missing multi-action data-anim-timeline`);
+  }
+  // Multi-action timeline: a shape that enters and later exits must retain both actions.
+  const multiActionSlide = manifest.slides.find(s => s.path.includes('47-ip-datagram-format'));
+  if (multiActionSlide) {
+    const maHtml = await fs.promises.readFile(path.join(convertedDeckDir, multiActionSlide.path), 'utf-8');
+    if (!/"step":4,"type":"entr"/.test(maHtml.replace(/&quot;/g, '"')) ||
+        !/"step":5,"type":"exit"/.test(maHtml.replace(/&quot;/g, '"'))) {
+      throw new Error('Slide 47 does not retain both the entrance and exit actions for its group');
+    }
+    console.log('✓ Validated multi-action (enter + exit) timelines are preserved across steps');
+  }
+  // Motion paths must be extracted as pixel-space CSS motion paths.
+  const motionSlide = manifest.slides.find(s => s.path.includes('19-destination-based-forwarding'));
+  if (motionSlide) {
+    const moHtml = await fs.promises.readFile(path.join(convertedDeckDir, motionSlide.path), 'utf-8');
+    if (!moHtml.includes('motion_path')) {
+      throw new Error('Slide 19 is missing extracted animMotion motion_path');
+    }
+    console.log('✓ Validated PowerPoint motion paths are extracted');
+  }
   // 6. Inspect slide 14 (ensuring text with flipH is not backwards)
   const slide14 = manifest.slides.find(s => s.path.includes('14-reflections-on-best-effort-service'));
   if (slide14) {
@@ -124,7 +146,7 @@ async function runTests() {
     if (!s12Html.includes('>i.</span>') || !s12Html.includes('>ii.</span>') || !s12Html.includes('>iii.</span>')) {
       throw new Error('Slide 12 missing properly formatted Roman numerals i., ii., iii.');
     }
-    if (!s12Html.includes('data-spid="3"') || !s12Html.includes('neo-anim-step-1 neo-anim-fade anim-hidden')) {
+    if (!s12Html.includes('data-spid="3"') || !/neo-anim-step-1 neo-anim-(fade|appear) anim-hidden/.test(s12Html)) {
       throw new Error('Slide 12 mask shape 3 is not initially hidden with animation step 1');
     }
     console.log('✓ Validated slide 12 has properly formatted Roman numerals, spacer paragraphs, and group animation with initially hidden mask');

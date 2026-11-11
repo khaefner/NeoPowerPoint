@@ -135,6 +135,10 @@ assert(displayManagerSrc.includes('xrandr --output "${secondaryOutput}" --same-a
 assert(displayManagerSrc.includes('displayswitch.exe /extend'), 'Must generate Windows displayswitch extend command');
 assert(displayManagerSrc.includes('displayswitch.exe /clone'), 'Must generate Windows displayswitch clone command');
 assert(displayManagerSrc.includes('CGConfigureDisplayMirrorOfDisplay'), 'Must include macOS CoreGraphics unmirror support');
+assert(displayManagerSrc.includes('queryMacOSDisplays'), 'Must include queryMacOSDisplays for hardware mirror detection');
+assert(displayManagerSrc.includes('parseSystemProfilerDisplays'), 'Must include parseSystemProfilerDisplays fallback');
+assert(displayManagerSrc.includes('selectPresenterAndAudienceDisplays'), 'Must include selectPresenterAndAudienceDisplays');
+assert(displayManagerSrc.includes('visibleOnFullScreen'), 'Must set visibleOnFullScreen on macOS single/mirrored fallback');
 assert(displayManagerSrc.includes('unmirrorMacOS'), 'Must include unmirrorMacOS method');
 assert(displayManagerSrc.includes('swapDisplays'), 'DisplayManager must implement swapDisplays');
 assert(displayManagerSrc.includes('duplicateSlideShow'), 'DisplayManager must implement duplicateSlideShow');
